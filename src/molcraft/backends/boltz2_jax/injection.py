@@ -20,7 +20,9 @@ class NativeVocabulary:
     def from_boltz(cls, const):
         # Pinned Boltz featurizer one-hots the atomic number itself (C=6).
         return cls(tuple(ATOMIC_NUMBERS),
-                   (0,) + tuple(const.bond_type_ids[x] for x in BOND_TYPES[1:]),
+                   # Native tokenization reserves zero for no edge and shifts
+                   # the chemical bond IDs by one (SINGLE=2, not 1).
+                   (0,) + tuple(const.bond_type_ids[x] + 1 for x in BOND_TYPES[1:]),
                    const.num_elements, len(const.bond_types) + 1)
 
     def validate(self):

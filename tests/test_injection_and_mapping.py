@@ -77,6 +77,7 @@ def test_boltz_elements_use_atomic_numbers_not_zero_based_periodic_table():
                             bond_type_ids={"SINGLE": 1, "DOUBLE": 2, "TRIPLE": 3, "AROMATIC": 4})
     vocabulary = NativeVocabulary.from_boltz(const)
     assert vocabulary.element_indices == (6, 7, 8, 9, 15, 16, 17, 35, 53)
+    assert vocabulary.bond_indices == (0, 2, 3, 4, 5)
     vocabulary.validate()
 
 
