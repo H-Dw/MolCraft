@@ -1,6 +1,6 @@
 """Small explicit YAML interface; paths are relative to the configuration file."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 import yaml
 
@@ -8,6 +8,26 @@ from molcraft.errors import ConfigurationError
 from molcraft.types import ComplexSpec, ModelPaths, ProteinSpec, ResidueRef
 from molcraft.losses.spec import ObjectiveSpec
 from molcraft.guidance.proposals import ProposalPolicy
+
+
+@dataclass(frozen=True)
+class EvaluationSpec:
+    """One-round discrete rescoring; None inherits the design model depth."""
+
+    candidate_budget: int = 2
+    sampling_steps: int | None = None
+    trunk_passes: int | None = None
+    require_affinity_nonworsening: bool = False
+
+    def __post_init__(self):
+        for name in ("candidate_budget", "sampling_steps", "trunk_passes"):
+            value = getattr(self, name)
+            if value is None and name != "candidate_budget":
+                continue
+            if type(value) is not int or value < 1:
+                raise ConfigurationError(f"evaluation.{name} must be a positive integer")
+        if type(self.require_affinity_nonworsening) is not bool:
+            raise ConfigurationError("evaluation.require_affinity_nonworsening must be boolean")
 
 
 @dataclass(frozen=True)
@@ -19,6 +39,15 @@ class RunConfig:
     sampling_steps: int = 25
     trunk_passes: int = 1
     seed: int = 0
+    evaluation: EvaluationSpec = field(default_factory=EvaluationSpec)
+
+    @property
+    def evaluation_sampling_steps(self):
+        return self.evaluation.sampling_steps or self.sampling_steps
+
+    @property
+    def evaluation_trunk_passes(self):
+        return self.evaluation.trunk_passes or self.trunk_passes
 
 
 def load_config(path):
@@ -26,7 +55,7 @@ def load_config(path):
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ConfigurationError("Configuration must be a YAML mapping")
-    allowed = {"proteins", "ligand", "pocket", "model_paths", "objective", "proposal", "run"}
+    allowed = {"proteins", "ligand", "pocket", "model_paths", "objective", "proposal", "run", "evaluation"}
     if set(data) - allowed:
         raise ConfigurationError(f"Unknown configuration sections: {sorted(set(data) - allowed)}")
 
@@ -52,7 +81,10 @@ def load_config(path):
         if "frozen_atom_ids" in policy_data:
             policy_data["frozen_atom_ids"] = tuple(policy_data["frozen_atom_ids"])
         policy = ProposalPolicy(**policy_data)
-        result = RunConfig(spec, objective, policy, **run)
+        evaluation = EvaluationSpec(**data.get("evaluation", {}))
+        if evaluation.require_affinity_nonworsening and objective.affinity_weight == 0:
+            raise ConfigurationError("The affinity acceptance guard requires an active affinity loss")
+        result = RunConfig(spec, objective, policy, evaluation=evaluation, **run)
         objective.validate(result.gradient_mode)
         if (type(result.sampling_steps) is not int or result.sampling_steps < 1
                 or type(result.trunk_passes) is not int or result.trunk_passes < 1

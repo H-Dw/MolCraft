@@ -1,0 +1,38 @@
+# Same small fixture/depth as the existing 25-step DCU acceptance.
+# Replace all example target/ligand fields for an actual design problem.
+proteins:
+  - {chain_id: A, sequence: ACDEFGHIKLMN}
+ligand: {chain_id: L, smiles: CCC}
+pocket:
+  - {chain_id: A, position: 2}
+  - {chain_id: A, position: 5}
+model_paths:
+  structure_checkpoint: /models/boltz/boltz2_conf.ckpt
+  affinity_checkpoint: /models/boltz/boltz2_aff.ckpt
+  ccd_path: /models/boltz/ccd.pkl
+  molecule_dir: /models/boltz/mols
+objective:
+  affinity_weight: 1.0
+  contact_weight: 2.5
+  confidence_weight: 2.5
+  geometry_weight: 1.0
+  contact_cutoff: 8.0
+  geometry_cutoff: 6.0
+  softmin_temperature: 0.5
+  clash_scale: 0.75
+proposal:
+  temperature: 1.0
+  per_channel: 32
+  max_proposals: 256
+  max_candidates: 32
+  max_bundle_size: 2
+run:
+  gradient_mode: through_structure
+  sampling_steps: 25
+  trunk_passes: 1
+  seed: 0
+evaluation:
+  candidate_budget: 2
+  sampling_steps: 25
+  trunk_passes: 1
+  require_affinity_nonworsening: false

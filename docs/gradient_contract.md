@@ -17,7 +17,7 @@
 
 - 蛋白序列、MSA、参考布局均不作为配体化学变量。
 - 没有 affinity 属性的原生解析避免调用配体标准化；之后显式设置设计配体 affinity mask，并生成原生 query-only affinity profile。
-- 不执行原生 affinity crop，保留同一固定上下文，确保三种损失共享预测及 token 布局。
+- 不执行原生 affinity crop，保留同一固定上下文，确保各项目标共享预测及 token 布局。
 - 多头亲和力平均 probability 后取 logit；关闭分子量校正。它是透明的 DBMol 风格目标，不宣称精确复现未披露的 DBMol 实现配置。
 - 返回原始 atom 坐标，不构造蛋白 backbone/atom37 视图。
 - 梯度不默认做每通道归一化，否则温度及不同编辑方向间的尺度会改变。

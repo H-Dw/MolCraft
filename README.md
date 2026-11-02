@@ -14,6 +14,7 @@ the included selector is deterministic and does not call an LLM service.
 - [梯度与模型契约](docs/gradient_contract.md)
 - [本地验证报告](docs/validation.md)
 - [远端 DCU 实测报告](docs/dtk_validation.md)
+- [当前梯度策略、Mosaic/DBMol 对照与配置](docs/gradient_strategy_and_profiles.md)
 
 ## Linux CPU installation
 
@@ -64,3 +65,25 @@ a small synthetic input, not a binding-activity benchmark.
 
 The runtime package is `molcraft`; the distribution name is `molcraft-local` to
 avoid claiming ownership of another published MolCraft package.
+
+## One-round design and independent rescoring presets
+
+`configs/test.yaml` retains the tested 25-step design/evaluation depth and rescores
+up to two edits. `mosaic-like.yaml` retains coordinate gradients and uses 200 steps /
+four trunk passes to rescore up to eight edits. `bdmol-like.yaml` is DBMol-inspired:
+it stops structure gradients and sets geometry weight to zero while retaining
+MolCraft's discrete edits. These presets use example inputs and generic local
+resource paths; replace them before running a real target.
+
+```bash
+molcraft propose --config configs/mosaic-like.yaml --output outputs/proposals
+molcraft evaluate-set --config configs/mosaic-like.yaml \
+  --packet outputs/proposals/proposals.json --output outputs/evaluation
+```
+
+The new `evaluation` section controls rescoring depth, candidate budget and an
+optional affinity-proxy nonworsening gate. The source baseline is recomputed at
+the same depth as candidates. `next_graph.json` contains the recommended graph,
+including its hydrogen editing policy; the input is not mutated. This is one
+round, with no automatic multi-round driver. The new preset/gating logic is CPU
+tested; its 200-step/four-pass ligand model path has not received GPU acceptance.

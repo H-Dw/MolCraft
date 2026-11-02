@@ -88,7 +88,7 @@ def _evaluate(args):
     packet = load_packet(args.packet)
     with prepare_complex(config.complex) as prepared:
         backend = Boltz2Backend.from_paths(config.complex.model_paths,
-                                           config.sampling_steps, config.trunk_passes)
+                                           config.evaluation_sampling_steps, config.evaluation_trunk_passes)
         result = evaluate_candidate(prepared, packet.candidate(args.candidate),
             objective=config.objective, noise_seed=config.seed, backend=backend,
             export_dir=Path(args.output))
@@ -98,6 +98,22 @@ def _evaluate(args):
                             ligand_coordinates=result.pop("ligand_coordinates"))
         save_json(result, output / "evaluation.json")
         print(json.dumps(result, indent=2))
+
+
+def _evaluate_set(args):
+    from molcraft import prepare_complex
+    from molcraft.evaluation import evaluate_packet
+    from molcraft.io.config import load_config
+    from molcraft.io.serialization import load_packet, save_json
+
+    config = load_config(args.config)
+    packet = load_packet(args.packet)
+    with prepare_complex(config.complex) as prepared:
+        result = evaluate_packet(prepared, packet, config, export_dir=Path(args.output))
+        save_json(result, Path(args.output) / "evaluation.json")
+        save_json(result["selected_graph"], Path(args.output) / "next_graph.json")
+        print(json.dumps({"status": result["status"], "selected_id": result["selected_id"],
+                          "selected_loss": result["selected_loss"]}, indent=2))
 
 
 def main(argv=None):
@@ -118,6 +134,11 @@ def main(argv=None):
     evaluate.add_argument("--candidate", required=True)
     evaluate.add_argument("--output", required=True)
     evaluate.set_defaults(func=_evaluate)
+    evaluate_set = commands.add_parser("evaluate-set", help="Rescore a bounded candidate set and recommend one graph")
+    evaluate_set.add_argument("--config", required=True)
+    evaluate_set.add_argument("--packet", required=True)
+    evaluate_set.add_argument("--output", required=True)
+    evaluate_set.set_defaults(func=_evaluate_set)
     args = parser.parse_args(argv)
     try:
         args.func(args)
