@@ -32,7 +32,7 @@ def test_native_layout_uses_names_and_ids_across_interleaved_chains():
     features = {"asym_id": np.array([[0, 1, 0, 1, 1]]), "mol_type": np.array([[0, 3, 0, 3, 3]]),
                 "atom_to_token": np.eye(5)[atom_tokens][None],
                 "atom_pad_mask": np.ones((1, 6)), "token_pad_mask": np.ones((1, 5)),
-                "ref_element": np.eye(118)[[6, 5, 5, 6, 5, 7]][None]}
+                "ref_element": np.eye(128)[[7, 6, 6, 7, 6, 8]][None]}
     spec = ComplexSpec((ProteinSpec("A", "AG"),), graph.mapped_smiles,
                        (ResidueRef("A", 1), ResidueRef("A", 2)))
     layout = layout_from_native(graph, features, tokens, structure, {"LIG0": mol}, {"A": 0, "L": 1}, spec)
@@ -40,6 +40,9 @@ def test_native_layout_uses_names_and_ids_across_interleaved_chains():
     assert layout.ligand_atom_indices == (2, 5, 4)
     assert layout.ligand_token_indices == (1, 4, 3)
     assert layout.pocket_atom_groups == ((0, 1), (3,))
+    from rdkit import Chem
+    expected_radii = tuple(Chem.GetPeriodicTable().GetRvdw(z) for z in (7, 6, 7))
+    np.testing.assert_allclose(layout.protein_vdw_radii, expected_radii)
     broken = type(mol)(mol)
     broken.GetAtomWithIdx(0).SetAtomMapNum(0)
     with pytest.raises(MappingError):

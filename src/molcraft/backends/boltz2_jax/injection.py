@@ -18,8 +18,8 @@ class NativeVocabulary:
 
     @classmethod
     def from_boltz(cls, const):
-        # Pinned Boltz featurizer uses atomic_number-1 in ref_element.
-        return cls(tuple(z - 1 for z in ATOMIC_NUMBERS),
+        # Pinned Boltz featurizer one-hots the atomic number itself (C=6).
+        return cls(tuple(ATOMIC_NUMBERS),
                    (0,) + tuple(const.bond_type_ids[x] for x in BOND_TYPES[1:]),
                    const.num_elements, len(const.bond_types) + 1)
 

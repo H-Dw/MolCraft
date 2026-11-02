@@ -14,7 +14,7 @@ from molcraft.errors import MappingError
 def native_fixture(graph):
     layout = AtomLayout(graph.atom_ids, (3, 0, 4), (4, 1, 3), (1, 2, 5), (0,), ((1, 2),),
                         6, 5, (1.7, 1.55, 1.52))
-    vocabulary = NativeVocabulary(tuple(z - 1 for z in ATOMIC_NUMBERS), (0, 1, 2, 3, 4), 118, 5)
+    vocabulary = NativeVocabulary(tuple(ATOMIC_NUMBERS), (0, 1, 2, 3, 4), 118, 5)
     features = {"ref_element": np.zeros((1, 6, 118), dtype=np.float32),
                 "ref_charge": np.zeros((1, 6), dtype=np.float32),
                 "token_bonds": np.zeros((1, 5, 5, 1), dtype=np.float32),
@@ -52,7 +52,7 @@ def test_three_channels_differentiate_at_onehot_and_edges_sum_both_directions(gr
 
     def objective(x):
         f = inject_chemistry(features, x, layout, vocabulary)
-        return (f["ref_element"][0, 3, 6] * 7 + f["ref_charge"][0, 3] * 11
+        return (f["ref_element"][0, 3, 7] * 7 + f["ref_charge"][0, 3] * 11
                 + f["type_bonds_onehot"][0, 4, 1, 2] * 2
                 + f["type_bonds_onehot"][0, 1, 4, 2] * 3
                 + f["token_bonds"][0, 4, 1, 0])
@@ -68,6 +68,16 @@ def test_three_channels_differentiate_at_onehot_and_edges_sum_both_directions(gr
     perturbed = jax.tree.map(lambda x, d: x + eps * d, inputs, direction)
     finite_difference = (objective(perturbed) - objective(inputs)) / eps
     np.testing.assert_allclose(finite_difference, 7, atol=1e-3)
+
+
+def test_boltz_elements_use_atomic_numbers_not_zero_based_periodic_table():
+    from types import SimpleNamespace
+
+    const = SimpleNamespace(num_elements=128, bond_types=list(range(6)),
+                            bond_type_ids={"SINGLE": 1, "DOUBLE": 2, "TRIPLE": 3, "AROMATIC": 4})
+    vocabulary = NativeVocabulary.from_boltz(const)
+    assert vocabulary.element_indices == (6, 7, 8, 9, 15, 16, 17, 35, 53)
+    vocabulary.validate()
 
 
 def test_mapping_rejects_duplicate_native_atoms():

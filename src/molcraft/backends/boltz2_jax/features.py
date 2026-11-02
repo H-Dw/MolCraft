@@ -85,7 +85,7 @@ def layout_from_native(graph, features, tokens, structure, molecules, chain_ids,
         pocket_tokens.append(t)
         groups.append(tuple(int(i) for i in np.flatnonzero((atom_to_token[:, t] > 0.5) & atom_mask)))
     element_indices = np.asarray(features["ref_element"])[0].argmax(axis=-1)
-    radii = tuple(Chem.GetPeriodicTable().GetRvdw(int(element_indices[i]) + 1) for i in protein_atoms)
+    radii = tuple(Chem.GetPeriodicTable().GetRvdw(int(element_indices[i])) for i in protein_atoms)
     return AtomLayout(graph.atom_ids, tuple(atom_map[i] for i in graph.atom_ids),
                       tuple(token_map[i] for i in graph.atom_ids), tuple(int(i) for i in protein_atoms),
                       tuple(pocket_tokens), tuple(groups), len(atom_mask), len(asym), radii)
