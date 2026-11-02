@@ -84,6 +84,35 @@ def test_native_writer_uses_structures_subdirectory_and_raw_atom_shapes(tmp_path
     assert destination.read_text().startswith("data_complex")
 
 
+def test_reference_conformer_initializes_native_ring_and_hybridization_caches(monkeypatch):
+    from rdkit import Chem
+    from rdkit.Chem import AllChem
+    from molcraft.backends.boltz2_jax.features import _reference_conformer
+
+    smiles = "[CH:1]1=[P:3][CH2:2]1"
+    # Reproduce a valid graph with native-style missing computed properties.
+    native = Chem.MolFromSmiles(smiles, sanitize=False)
+    native.UpdatePropertyCache(strict=False)
+    for atom in native.GetAtoms():
+        atom.SetProp("name", f"X{atom.GetAtomMapNum()}")
+    original = AllChem.UFFHasAllMoleculeParams
+
+    def typing_with_cleared_ring_cache(mol):
+        supported = original(mol)
+        mol.ClearComputedProps()  # reproduce the native P-typing cache boundary
+        return supported
+
+    monkeypatch.setattr(AllChem, "UFFHasAllMoleculeParams", typing_with_cleared_ring_cache)
+    result = _reference_conformer(native, 0)
+    graph_matches_native(MolecularGraph.from_smiles(smiles), result)
+    assert result.GetRingInfo().NumRings() == 1
+    assert all(a.GetHybridization() != Chem.HybridizationType.UNSPECIFIED for a in result.GetAtoms())
+    assert [a.GetProp("name") for a in result.GetAtoms()] == ["X1", "X3", "X2"]
+    assert result.GetConformer().GetProp("name") == "Computed"
+    assert np.isfinite(result.GetConformer().GetPositions()).all()
+    assert native.GetNumConformers() == 0  # input was not modified
+
+
 def test_noise_replay_follows_atom_ids_instead_of_raw_array_positions():
     original = AtomLayout((1, 2, 3), (3, 0, 4), (4, 1, 3), (1, 2, 5), (0,), ((1, 2),),
                           6, 5, (1.7, 1.7, 1.7))

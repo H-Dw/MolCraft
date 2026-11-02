@@ -119,6 +119,10 @@ def _reference_conformer(mol, seed):
     from rdkit.Chem import AllChem
 
     heavy = Chem.Mol(mol)
+    # Native cached molecules can have cleared ring/property caches even though
+    # their graph is valid. Initialize chemical caches on our private copy before
+    # AddHs/ETKDG/UFF; never change the caller's molecule or accept an invalid graph.
+    Chem.SanitizeMol(heavy)
     expanded = Chem.AddHs(heavy)
     expanded.RemoveAllConformers()
     options = AllChem.ETKDGv3()
@@ -127,9 +131,14 @@ def _reference_conformer(mol, seed):
         options.useRandomCoords = True
         if AllChem.EmbedMolecule(expanded, options) < 0:
             raise ConfigurationError("Cannot generate the ligand reference conformer")
-    if AllChem.UFFHasAllMoleculeParams(expanded):
+    has_uff_parameters = AllChem.UFFHasAllMoleculeParams(expanded)
+    # UFF typing may change hybridization (notably P) and clear ring caches.
+    # Rebuild rings after typing, before force-field construction.
+    Chem.GetSymmSSSR(expanded)
+    if has_uff_parameters:
         AllChem.UFFOptimizeMolecule(expanded, maxIters=1000)
     result = Chem.RemoveHs(expanded, sanitize=False)
+    Chem.SanitizeMol(result)
     conformer = result.GetConformer()
     conformer.SetProp("name", "Computed")
     conformer.SetProp("coord_generation", "ETKDGv3")
