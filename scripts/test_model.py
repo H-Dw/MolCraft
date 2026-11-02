@@ -22,6 +22,8 @@ def main():
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--candidate-budget", type=int, default=2)
     parser.add_argument("--skip-components", action="store_true")
+    parser.add_argument("--charge-control", action="store_true",
+                        help="Also rescore a charge-only edit for channel coverage")
     args = parser.parse_args()
     if args.candidate_budget < 1:
         parser.error("--candidate-budget must be positive")
@@ -31,6 +33,7 @@ def main():
     report = {"status": "running", "started_at": datetime.now(timezone.utc).isoformat(),
               "config": str(args.config.resolve()), "stages": [],
               "components_requested": not args.skip_components}
+    report["charge_control_requested"] = args.charge_control
 
     def persist():
         report["elapsed_seconds"] = time.monotonic() - started
@@ -142,6 +145,30 @@ def main():
                 report["candidates"].append(measured)
                 stage(f"{candidate.candidate_id}_rebuilt_rescored_exported")
             report["best_actual_change"] = min(c["actual_change"] for c in report["candidates"])
+            if args.charge_control:
+                charge_packet = build_proposals(prepared.graph, evidence,
+                    replace(config.policy, max_bundle_size=1, max_candidates=128))
+                save_packet(charge_packet, output / "charge-control-proposals.json")
+                choices = [c for c in charge_packet.candidates if c.operations and
+                           all(op.kind == "charge" for op in c.operations)]
+                if not choices:
+                    raise RuntimeError("No legal charge-only candidate for coverage control")
+                candidate = min(choices, key=lambda c: (c.predicted_change, c.candidate_id))
+                result = evaluate_candidate(prepared, candidate, noise=noise,
+                    objective=config.objective, noise_seed=config.seed, backend=backend,
+                    export_dir=output / "charge-control")
+                if not np.isfinite(result["coordinates"]).all():
+                    raise RuntimeError("Nonfinite charge-control coordinates")
+                np.savez_compressed(output / "charge-control" / "coordinates.npz",
+                                    coordinates=result["coordinates"])
+                measured = {k: v for k, v in result.items() if k not in
+                            ("coordinates", "ligand_coordinates")}
+                measured.update(status="passed", candidate=candidate.to_dict(),
+                    baseline_loss=baseline["loss"], actual_change=result["loss"] - baseline["loss"],
+                    interpretation="Coverage control selected from charge-only single-edit proposals")
+                save_json(measured, output / "charge-control.json")
+                report["charge_control"] = measured
+                stage("charge_control_rebuilt_rescored_exported")
             report["interpretation"] = (
                 "Runtime acceptance only; this toy target is not a biological efficacy benchmark. "
                 "Directional derivatives do not guarantee a lower discrete-candidate loss.")
