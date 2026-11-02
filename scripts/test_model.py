@@ -114,6 +114,17 @@ def main():
             if not np.isfinite(baseline["coordinates"]).all():
                 raise RuntimeError("Nonfinite source coordinates")
             np.testing.assert_allclose(baseline["loss"], evidence.metrics["loss"], rtol=1e-4, atol=1e-4)
+            with prepare_complex(config.complex) as repeated:
+                if repeated.layout != prepared.layout:
+                    raise RuntimeError("Repeated source preparation changed the atom layout")
+                for name in prepared.features:
+                    np.testing.assert_array_equal(prepared.features[name], repeated.features[name],
+                                                  err_msg=f"Nondeterministic native feature: {name}")
+                replayed = backend.evaluate(repeated, config.objective, config.seed, noise)
+                np.testing.assert_allclose(replayed["loss"], baseline["loss"], rtol=1e-6, atol=1e-6)
+                report["source_replay"] = {"features_bitwise_equal": True,
+                                           "loss": replayed["loss"]}
+                stage("source_repreparation_replay_passed")
             np.savez_compressed(output / "source_coordinates.npz", coordinates=baseline["coordinates"])
             write_ligand_sdf(prepared.graph, baseline["ligand_coordinates"], output / "source.sdf")
             prepared.native_writer(baseline["coordinates"], output / "source.cif")
