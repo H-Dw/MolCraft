@@ -57,6 +57,19 @@ def test_real_config_and_missing_assets_fail_without_downloads():
         verify_assets(config.complex.model_paths)
 
 
+def test_feature_resources_can_be_checked_before_weight_download(tmp_path):
+    from molcraft.types import ModelPaths
+
+    ccd = tmp_path / "ccd.pkl"
+    ccd.write_bytes(b"test-resource-not-a-real-ccd")
+    molecules = tmp_path / "mols"
+    molecules.mkdir()
+    paths = ModelPaths(tmp_path / "absent_structure", tmp_path / "absent_affinity", ccd, molecules)
+    verify_assets(paths, require_weights=False)
+    with pytest.raises(MissingAssetError, match="structure_checkpoint"):
+        verify_assets(paths)
+
+
 def test_relative_local_msa_and_template_paths_are_resolved_without_opening_them(tmp_path):
     import yaml
 

@@ -19,10 +19,11 @@ from molcraft.errors import ConfigurationError, MappingError, MissingAssetError
 from molcraft.types import PreparedComplex
 
 
-def verify_assets(paths):
+def verify_assets(paths, *, require_weights=True):
     if paths is None:
         raise MissingAssetError("Explicit local model_paths are required; no assets are downloaded")
-    for name in ("structure_checkpoint", "affinity_checkpoint", "ccd_path"):
+    names = ("structure_checkpoint", "affinity_checkpoint", "ccd_path") if require_weights else ("ccd_path",)
+    for name in names:
         path = Path(getattr(paths, name)).expanduser()
         if not path.is_file() or path.stat().st_size == 0:
             raise MissingAssetError(f"Missing/nonempty local resource required: {name}: {path}")
@@ -135,7 +136,9 @@ def _reference_conformer(mol, seed):
 
 
 def prepare_complex(spec):
-    verify_assets(spec.model_paths)
+    # Native chemical features require CCD/molecules, independently of weights.
+    # The model loader verifies both checkpoints before loading either network.
+    verify_assets(spec.model_paths, require_weights=False)
     graph = MolecularGraph.from_smiles(spec.ligand_smiles)
     if len(graph.atom_ids) > 128:
         raise ConfigurationError("Pinned Boltz affinity supports at most 128 ligand heavy atoms")
