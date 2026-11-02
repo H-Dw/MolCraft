@@ -1,3 +1,5 @@
+import os
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -50,7 +52,8 @@ def test_diffusion_coordinate_gradient_and_fixed_noise_finite_difference():
     finite = (loss(x + 1e-3) - loss(x - 1e-3)) / 2e-3
     assert np.isfinite(gradient).all() and abs(float(gradient[0])) > 1e-4
     np.testing.assert_allclose(gradient[0], finite, rtol=1e-3, atol=1e-3)
-    assert jax.devices()[0].platform == "cpu"
+    if os.environ.get("MOLCRAFT_RUN_MODEL_TESTS") != "1":
+        assert jax.devices()[0].platform == "cpu"
 
 
 def test_contact_uses_8_angstrom_probability_mass():
