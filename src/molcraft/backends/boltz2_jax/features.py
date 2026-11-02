@@ -101,7 +101,7 @@ class NativeWriter:
         import boltz.main as native
 
         output = self.root / "native_export"
-        writer = native.BoltzWriter(data_dir=self.processed_dir, output_dir=output,
+        writer = native.BoltzWriter(data_dir=self.processed_dir / "structures", output_dir=output,
                                     output_format="mmcif", boltz2=True)
         coords = np.asarray(coordinates).reshape(1, 1, -1, 3)
         pred = {"exception": False, "coords": torch.tensor(coords),

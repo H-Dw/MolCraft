@@ -49,6 +49,41 @@ def test_native_layout_uses_names_and_ids_across_interleaved_chains():
         graph_matches_native(graph, broken)
 
 
+def test_native_writer_uses_structures_subdirectory_and_raw_atom_shapes(tmp_path, monkeypatch):
+    import sys
+    from types import ModuleType
+    from molcraft.backends.boltz2_jax.features import NativeWriter
+
+    processed = tmp_path / "processed"
+    structures = processed / "structures"
+    structures.mkdir(parents=True)
+    (structures / "complex.npz").write_bytes(b"test-native-record")
+
+    class Writer:
+        def __init__(self, data_dir, output_dir, output_format, boltz2):
+            assert data_dir == structures and (data_dir / "complex.npz").is_file()
+            assert output_format == "mmcif" and boltz2
+            self.output = output_dir
+
+        def write_on_batch_end(self, _trainer, _module, pred, _indices, batch, _idx, _loader):
+            assert pred["coords"].shape == (1, 1, 6, 3)
+            assert pred["masks"].shape == (1, 1, 6)
+            assert batch["record"][0].id == "complex"
+            path = self.output / "complex" / "complex_model_0.cif"
+            path.parent.mkdir(parents=True)
+            path.write_text("data_complex\n#\n")
+
+    package = ModuleType("boltz")
+    package.main = SimpleNamespace(BoltzWriter=Writer)
+    monkeypatch.setitem(sys.modules, "boltz", package)
+    monkeypatch.setitem(sys.modules, "boltz.main", package.main)
+    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(tensor=np.asarray, ones=np.ones))
+    writer = NativeWriter(SimpleNamespace(id="complex"), processed, tmp_path, np.ones((1, 6)))
+    destination = tmp_path / "export" / "complex.cif"
+    writer(np.zeros((1, 6, 3)), destination)
+    assert destination.read_text().startswith("data_complex")
+
+
 def test_noise_replay_follows_atom_ids_instead_of_raw_array_positions():
     original = AtomLayout((1, 2, 3), (3, 0, 4), (4, 1, 3), (1, 2, 5), (0,), ((1, 2),),
                           6, 5, (1.7, 1.7, 1.7))
