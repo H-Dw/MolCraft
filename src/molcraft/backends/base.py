@@ -1,0 +1,9 @@
+from typing import Protocol
+
+
+class GradientBackend(Protocol):
+    def draw_noise(self, prepared, seed): ...
+
+    def value_and_grad(self, prepared, objective, gradient_mode, noise_seed=0, noise=None): ...
+
+    def evaluate(self, prepared, objective, noise_seed=0, noise=None): ...

@@ -1,0 +1,88 @@
+[
+  {
+    "repository": "escalante-bio/mosaic",
+    "commit": "5937f37164bcb28bc6f1000f10134145438e5971",
+    "source": "src/mosaic/sampling/core.py",
+    "destination": "src/molcraft/sampling/core.py",
+    "source_sha256": "653026fe1695ec551ff88847e5970ce62c23496d1687be62ca12240a1eec6f5c",
+    "adaptation": "Local namespace; annotations-only Joltz import for the model adapter.",
+    "destination_sha256": "653026fe1695ec551ff88847e5970ce62c23496d1687be62ca12240a1eec6f5c"
+  },
+  {
+    "repository": "escalante-bio/mosaic",
+    "commit": "5937f37164bcb28bc6f1000f10134145438e5971",
+    "source": "src/mosaic/sampling/schedules.py",
+    "destination": "src/molcraft/sampling/schedules.py",
+    "source_sha256": "fceb0fc089add5d7ecd5c5e2ce21c24c917903622bd6017709f922077f78eeda",
+    "adaptation": "Local namespace; annotations-only Joltz import for the model adapter.",
+    "destination_sha256": "fceb0fc089add5d7ecd5c5e2ce21c24c917903622bd6017709f922077f78eeda"
+  },
+  {
+    "repository": "escalante-bio/mosaic",
+    "commit": "5937f37164bcb28bc6f1000f10134145438e5971",
+    "source": "src/mosaic/sampling/boltz2.py",
+    "destination": "src/molcraft/sampling/boltz2.py",
+    "source_sha256": "4621fae791dbfcd34788ab443a13bcb2aa300d89b28c0320b44c1268ff67ade8",
+    "adaptation": "Local namespace; annotations-only Joltz import for the model adapter.",
+    "destination_sha256": "3a10d223f8da60ff36fc35c0881c6f66aab9355273fe7da09b5f3bbe10a190cf"
+  },
+  {
+    "repository": "escalante-bio/mosaic",
+    "commit": "5937f37164bcb28bc6f1000f10134145438e5971",
+    "source": "src/mosaic/sampling/__init__.py",
+    "destination": "src/molcraft/sampling/__init__.py",
+    "source_sha256": "2e145f7bb1630e14f937dcf8560e12307bf2de59b55af77de51f0cf3e754034c",
+    "adaptation": "Local namespace; annotations-only Joltz import for the model adapter.",
+    "destination_sha256": "91cdc45a4f70cf3877317afba794ecb187aa19b513851b4aa1e8a81ad425ec8e"
+  },
+  {
+    "repository": "nboyd/joltz",
+    "commit": "ed0f04257dac85bd4b7bf45521cc280f86d38ded",
+    "source": "LICENSE",
+    "destination": "third_party/Joltz.LICENSE",
+    "source_sha256": "485f6fa093026b121a00b26db38699ac8c6f368a97d6f07a51aa7273f4ce9977",
+    "adaptation": "Original license; runtime dependency pinned to this commit.",
+    "destination_sha256": "485f6fa093026b121a00b26db38699ac8c6f368a97d6f07a51aa7273f4ce9977"
+  },
+  {
+    "repository": "escalante-bio/boltz",
+    "commit": "7ea718a1440ecbe8e2418317192b501544147edd",
+    "source": "LICENSE",
+    "destination": "third_party/Boltz.LICENSE",
+    "source_sha256": "f0667fd5e66c51e1ba8ddaa0249c6d7225b30037e02c45782d8f2c2943ac2617",
+    "adaptation": "Original license; runtime dependency pinned to this commit.",
+    "destination_sha256": "f0667fd5e66c51e1ba8ddaa0249c6d7225b30037e02c45782d8f2c2943ac2617"
+  },
+  {
+    "repository": "escalante-bio/mosaic",
+    "commit": "5937f37164bcb28bc6f1000f10134145438e5971",
+    "source": "src/mosaic/losses/boltz2.py",
+    "destinations": [
+      "src/molcraft/backends/boltz2_jax/forward.py",
+      "src/molcraft/backends/boltz2_jax/weights.py",
+      "src/molcraft/backends/boltz2_jax/features.py"
+    ],
+    "adaptation": "Ligand-safe trunk/forward, local weight loader, offline native input preparation; protein backbone readout removed."
+  },
+  {
+    "repository": "nboyd/joltz",
+    "commit": "ed0f04257dac85bd4b7bf45521cc280f86d38ded",
+    "source": "src/joltz/__init__.py",
+    "destinations": [
+      "src/molcraft/backends/boltz2_jax/forward.py"
+    ],
+    "adaptation": "Continuous bond embedding in structure/confidence paths; native hard geometry bins retained."
+  },
+  {
+    "repository": "escalante-bio/boltz",
+    "commit": "7ea718a1440ecbe8e2418317192b501544147edd",
+    "sources": [
+      "src/boltz/model/modules/confidence_utils.py",
+      "src/boltz/model/loss/confidence.py"
+    ],
+    "destinations": [
+      "src/molcraft/backends/boltz2_jax/confidence.py"
+    ],
+    "adaptation": "Single-complex JAX frame-mask/pTM calculation using explicit ligand mapping."
+  }
+]

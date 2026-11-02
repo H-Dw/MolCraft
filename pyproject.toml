@@ -1,0 +1,47 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "molcraft-local"
+version = "0.1.0"
+description = "Gradient-informed, chemically constrained ligand edit proposals"
+readme = "README.md"
+requires-python = "==3.12.*"
+license = "MIT"
+license-files = ["LICENSE", "third_party/*.LICENSE", "third_party/NOTICE.md"]
+dependencies = ["numpy>=2.1", "PyYAML>=6.0.2", "rdkit>=2024.9.1"]
+
+[project.optional-dependencies]
+cpu = ["jax[cpu]>=0.6.2", "equinox>=0.13", "jaxtyping>=0.3"]
+boltz2 = [
+  "jax>=0.11.1", "equinox>=0.13", "jaxtyping>=0.3", "gemmi>=0.6.5",
+  "torch>=2.7", "joltz @ git+https://github.com/nboyd/joltz.git@ed0f04257dac85bd4b7bf45521cc280f86d38ded",
+  "boltz @ git+https://github.com/escalante-bio/boltz.git@7ea718a1440ecbe8e2418317192b501544147edd",
+]
+dev = ["pytest>=8.3", "ruff>=0.11", "build>=1.2"]
+
+[project.scripts]
+molcraft = "molcraft.cli:main"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/molcraft"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra -m 'not model_integration'"
+markers = ["model_integration: requires real Boltz weights; never run in CPU acceptance"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/molcraft/sampling/core.py" = ["F722"]
+"src/molcraft/sampling/boltz2.py" = ["F722"]
