@@ -51,11 +51,11 @@ def main():
         from molcraft.io.config import load_config
         from molcraft.io.serialization import save_json, save_packet, load_packet, write_ligand_sdf
 
-        report["versions"] = {name: importlib.metadata.version(name) for name in
-                              ("molcraft-local", "jax", "jaxlib", "equinox", "boltz", "joltz", "rdkit")}
         report["devices"] = [{"platform": d.platform, "kind": d.device_kind} for d in jax.devices()]
         if not any(d.platform in ("gpu", "rocm", "cuda") for d in jax.devices()):
             raise RuntimeError("This acceptance command requires an actual GPU/DCU device")
+        report["versions"] = {name: importlib.metadata.version(name) for name in
+                              ("molcraft-local", "jax", "jaxlib", "equinox", "boltz", "joltz", "rdkit")}
         root = Path(__file__).resolve().parents[1]
         report["commit"] = subprocess.check_output(
             ["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()

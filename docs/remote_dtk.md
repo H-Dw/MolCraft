@@ -10,7 +10,7 @@ source /root/opt/mosaic/activate_dtk.sh
 git clone https://github.com/H-Dw/MolCraft.git /root/opt/MolCraft
 cd /root/opt/MolCraft
 # 已部署时使用 git pull --ff-only；不覆盖本地改动。
-python -m pip install --no-deps --no-build-isolation -e .
+python -m pip install --no-deps --no-build-isolation .
 molcraft doctor
 python scripts/test_model.py --config configs/dtk_smoke.yaml \
   --output outputs/dtk-default25 --candidate-budget 2
@@ -19,6 +19,8 @@ python scripts/test_model.py --config configs/dtk_smoke.yaml \
 运行前须补齐配置列出的四项本地资源，尤其是原 Mosaic 核心部署尚未下载的
 `boltz2_aff.ckpt`。不把结构权重代替亲和力权重。测试入口要求实际 GPU／DCU，
 不读取 CPU 测试的 `conftest.py`，不调用 MSA 服务。
+每次拉取修复后再次执行上述安装命令。使用普通 wheel 安装，避免离线环境中
+editable 构建额外需要 `editables` 而无法安装；已有 hatchling 足以构建 wheel。
 
 测试分别记录设备、依赖版本、Git 提交和工作区状态，验证联合目标的三个化学
 梯度通道与四种单独目标梯度，再生成合法编辑、重新准备实际化学特征并用同一组
