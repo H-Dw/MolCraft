@@ -12,8 +12,10 @@ cd /root/opt/MolCraft
 # 已部署时使用 git pull --ff-only；不覆盖本地改动。
 python -m pip install --no-deps --no-build-isolation .
 molcraft doctor
+python scripts/check_native_features.py --config configs/dtk_smoke.yaml \
+  --output outputs/native-feature-check.json
 python scripts/test_model.py --config configs/dtk_smoke.yaml \
-  --output outputs/dtk-default25 --candidate-budget 2
+  --output outputs/dtk-default25 --candidate-budget 2 --charge-control
 ```
 
 运行前须补齐配置列出的四项本地资源，尤其是原 Mosaic 核心部署尚未下载的
