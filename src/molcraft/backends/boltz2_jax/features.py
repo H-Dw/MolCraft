@@ -6,6 +6,7 @@ used. Native parsing/featurization is called directly with checked local assets.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import random
@@ -145,10 +146,34 @@ def _reference_conformer(mol, seed):
     return result
 
 
+@contextmanager
+def _native_rng(seed):
+    """Isolate all native CPU randomness, including first-import side effects."""
+    py_state, np_state = random.getstate(), np.random.get_state()
+    try:
+        try:
+            import torch
+        except ImportError as exc:
+            raise ConfigurationError("Install the pinned .[boltz2] model dependencies") from exc
+        with torch.random.fork_rng(devices=[]):
+            torch.set_rng_state(torch.Generator(device="cpu").manual_seed(seed).get_state())
+            random.seed(seed)
+            np.random.seed(seed)
+            yield
+    finally:
+        random.setstate(py_state)
+        np.random.set_state(np_state)
+
+
 def prepare_complex(spec):
     # Native chemical features require CCD/molecules, independently of weights.
     # The model loader verifies both checkpoints before loading either network.
     verify_assets(spec.model_paths, require_weights=False)
+    with _native_rng(spec.conformer_seed):
+        return _prepare_complex(spec)
+
+
+def _prepare_complex(spec):
     graph = MolecularGraph.from_smiles(spec.ligand_smiles)
     if len(graph.atom_ids) > 128:
         raise ConfigurationError("Pinned Boltz affinity supports at most 128 ligand heavy atoms")
@@ -217,13 +242,10 @@ def prepare_complex(spec):
         for name in ligand_names:
             graph_matches_native(graph, molecules[name])
             molecules[name] = _reference_conformer(molecules[name], spec.conformer_seed)
-        import torch
         # The native featurizer randomly rotates/translates reference conformers
         # with CPU Torch RNG, independently of its NumPy Generator argument.
         # Seed that stream and restore caller state without touching GPU RNGs.
-        with torch.random.fork_rng(devices=[]):
-            generator = torch.Generator(device="cpu").manual_seed(spec.conformer_seed)
-            torch.set_rng_state(generator.get_state())
+        with _native_rng(spec.conformer_seed):
             raw = Boltz2Featurizer().process(tokenized, molecules=molecules,
                 random=np.random.default_rng(spec.conformer_seed), training=False,
                 max_atoms=None, max_tokens=None, max_seqs=const.max_msa_seqs,
