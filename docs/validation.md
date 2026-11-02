@@ -1,6 +1,6 @@
 # 本地 CPU 验证报告
 
-日期：2026-11-02。范围：本地代码搭建、CPU 数学与化学模块、无权重的 JAX 数据流、CLI 和打包。没有运行真实 Boltz-2／Joltz 模型。
+日期：2026-11-02。本文记录本地 CPU 验收：数学与化学模块、无权重 JAX 数据流、CLI 和打包。真实模型的远端 DCU 测评另见 [DCU 测评报告](dtk_validation.md)。
 
 ## 结果
 
@@ -9,6 +9,8 @@
 | CPU 测试（初次验收） | **59 passed，1 deselected**，11.76 s | 被排除的是真实模型集成测试 |
 | DTK 兼容修复后 CPU 测试 | **60 passed，1 deselected**，12.71 s | 增加 reduced SVD 梯度回归检查 |
 | JAX 0.6.0 CPU 兼容测试 | **60 passed，1 deselected**，12.85 s | 独立环境，NumPy 2.2.6；不代表 DCU 模型通过 |
+| 远端联调修复后的最终 CPU 回归 | **64 passed，1 deselected**，11.92 s | 官方 JAX 0.12.0.1，新增词表、写出器与环缓存回归 |
+| 最终 JAX 0.6.0 CPU 回归 | **64 passed，1 deselected**，11.82 s | 独立官方 JAX 环境，不使用厂商 CPU 路径 |
 | Python 3.11 语法兼容检查 | 36 个源码／脚本文件通过 | AST 语法检查；远端运行另行验证 |
 | Ruff 静态检查 | 通过 | 覆盖 src、tests、examples |
 | Python 3.12 编译检查 | 通过 | 不表示真实权重加载成功 |
@@ -43,7 +45,7 @@ CPU 示例对 CCC 生成单项编辑提议，参考选择器选择 CNC。这个�
 - 真实后端的 JIT 参数传递与公开 value_and_grad／evaluate_candidate 数据流使用**替代前向函数**在 CPU 验证，三个梯度通道均非零。
 - 提议包往返序列化、候选操作核对、SDF 稳定 ID 与坐标对应、配置路径解析。
 
-## 明确未运行
+## 本地 CPU 验收未运行的项目
 
 - 真实 checkpoint 的 Torch 加载与 Joltz 转换。
 - 使用真实 CCD／molecule 资源的完整 Boltz 原生预处理。
@@ -52,7 +54,7 @@ CPU 示例对 CCC 生成单项编辑提议，参考选择器选择 CNC。这个�
 - Torch 与 Joltz 的真实网络输出一致性。
 - GPU、显存、速度、真实 docking、结合活性与合成路线评价。
 
-没有下载模型权重或 CCD 数据，没有调用 MSA 服务。CPU 环境没有安装 torch、boltz 或 joltz；它们仅在可选模型安装组中固定来源。所有默认测试强制 `JAX_PLATFORMS=cpu`，并清空 `CUDA_VISIBLE_DEVICES`。
+本地 CPU 验收没有下载或加载模型权重／CCD，没有调用 MSA 服务。CPU 环境没有安装 torch、boltz 或 joltz。默认测试强制 `JAX_PLATFORMS=cpu`，并清空 `CUDA_VISIBLE_DEVICES`；显式模型测试开关允许远端使用其 DCU。真实资源与模型的后续远端运行在独立报告中记录。
 
 ## 环境
 

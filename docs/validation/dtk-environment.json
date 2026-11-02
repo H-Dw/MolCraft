@@ -1,0 +1,72 @@
+{
+  "python": "3.11.18 (main, Oct 26 2026, 11:35:17) [GCC 15.3.0]",
+  "executable": "/root/opt/conda-envs/mosaic-dtk/bin/python3.11",
+  "versions": {
+    "molcraft-local": "0.1.0",
+    "jax": "0.6.0+das.opt1.dtk2604",
+    "jaxlib": "0.6.0+das.opt1.dtk2604",
+    "jax-rocm60-pjrt": "0.6.0+das.opt1.dtk2604",
+    "jax-rocm60-plugin": "0.6.0+das.opt1.dtk2604",
+    "equinox": "0.13.8",
+    "torch": "2.11.0+cpu",
+    "boltz": "2.2.1",
+    "joltz": "0.1.0",
+    "numpy": "2.2.6",
+    "rdkit": "2026.9.1"
+  },
+  "repositories": {
+    "joltz": {
+      "module_path": "/root/opt/mosaic-deploy/vendor/joltz/src/joltz",
+      "commit": "ed0f04257dac85bd4b7bf45521cc280f86d38ded"
+    },
+    "boltz": {
+      "module_path": "/root/opt/mosaic-deploy/vendor/boltz/src/boltz",
+      "commit": "7ea718a1440ecbe8e2418317192b501544147edd"
+    },
+    "MolCraft": {
+      "path": "/root/opt/MolCraft",
+      "commit": "4cf4997005281bc6d81afd8953306e0dc134a8d6"
+    }
+  },
+  "installed_source_matches_checkout": true,
+  "validated_source_sha256": {
+    "src/molcraft/__init__.py": "1f986bed5471b94ce2a632db11fd80dc26d402dd322d305c45cfcea7089b4471",
+    "src/molcraft/api.py": "6dbcac24bc5be0200aa2322b5a0e6f040c6e2a391f8bc07f4506e8f3bd0cc0fc",
+    "src/molcraft/cli.py": "456e7d21f81d787524b9da5635357df42b062bcde58a930706c8caa3eba0c0a5",
+    "src/molcraft/errors.py": "4816652530a858e4a43a7a32416ee104b0b531afc8466d59aef5989b0ad3a67b",
+    "src/molcraft/types.py": "e83821a645a382aa05d38b257c4eb3fb6bc046e0c68b246d1339e721c7d06d34",
+    "src/molcraft/agent/__init__.py": "cb10ef5ac09392bcc57c7495deca2bcfd9115ccde1c9068221cb3065895127fc",
+    "src/molcraft/agent/selectors.py": "989a74a9438148642e3f4863376f23fefdfbe195f77b2fed1f5332b02f617636",
+    "src/molcraft/backends/__init__.py": "d40f0846a5124ce328235fd8e7e8f9721a581741137bf70f693827c9ea9de0bf",
+    "src/molcraft/backends/base.py": "6bd2df73510910770b0fda8eede2629e8068e15faabb04af402e4e9f34aec073",
+    "src/molcraft/backends/boltz2_jax/__init__.py": "e4e9e9a164f442dc2fc42280bad0194bea982e90b5585feb9fc0774a82d63804",
+    "src/molcraft/backends/boltz2_jax/backend.py": "1139803994d85aaf1317470da246c1e51e097aaf245f7873a2d5367ebb2b8ea6",
+    "src/molcraft/backends/boltz2_jax/confidence.py": "4646fabc99bdc6bdb8c14ff151ed0848aecca581378670ee790310ab64de49e2",
+    "src/molcraft/backends/boltz2_jax/forward.py": "0b4c5d84910d0630042cbc68fd848786ff6c77d5f178b7414b030e05558a158e",
+    "src/molcraft/backends/boltz2_jax/weights.py": "5ef3f3681c7233faa03c5033cd4295f73af9e8b45b1a42f1189f00d3e6dd8f19",
+    "src/molcraft/backends/boltz2_jax/injection.py": "b9073749114f0f8ca9feac590bef81fbf68e4466e8c260404b282179b6731ced",
+    "src/molcraft/backends/boltz2_jax/features.py": "729b46501c1f6ffa783be4502fe69f0008d0e3414fbe207a3bd66259aa07b160",
+    "src/molcraft/chemistry/__init__.py": "cb9bce1cfeb9e9fdb912114874952e51923d3c1d579962987216a7761f1df209",
+    "src/molcraft/chemistry/edits.py": "4a57bdcad27646b1a64a60a03bc5d58dff9595a0335e51980f003a0811c77e18",
+    "src/molcraft/chemistry/encoding.py": "c8f028bd58ee157c945378a7caf2092f099f445546ff14a9c981b083c57bdf99",
+    "src/molcraft/chemistry/graph.py": "0f769363dbd73e7aea4f4fa2ef1a3897ba6d964d39360d4594f4fc60452d495a",
+    "src/molcraft/chemistry/mapping.py": "9b5e0c74c88f4ffab1eaaba3710d468237fcd0d83a6ddd2cd64e1948fe42746a",
+    "src/molcraft/chemistry/vocabulary.py": "a3c885602bb07f38623b1cdd1ab16c84ee80688f2df1b694723449dc2b0d9e2c",
+    "src/molcraft/guidance/__init__.py": "a99977b5501a40140aba9391168443b4153fb937797189c66412503873c7c10b",
+    "src/molcraft/guidance/probability.py": "7f2dcef293012247298e6b0fe77036146e8aba29cfa40a454170f7f492ed5b71",
+    "src/molcraft/guidance/proposals.py": "da05828e9d59540aa8703adbd969ad0de6015dd5c2b691ac20f0721091b264d3",
+    "src/molcraft/io/__init__.py": "c809905583115011f31587afaf7b24370eb29a0289e12766786e65c28b297064",
+    "src/molcraft/io/config.py": "8f061b5d1846faf2394dcffcf83e9f52199efa3a968a6b30a555f100bb676926",
+    "src/molcraft/io/serialization.py": "f49717e789d6b022348ef93ac0f03ee8c252bd4cfca23d16849d50899f8391b2",
+    "src/molcraft/losses/__init__.py": "9041af23426d034157e9f98a0a5d0e4fc485dd032e27281ca234fadb0415b663",
+    "src/molcraft/losses/functions.py": "2521d0a837305222e0aed7ffdc6fb56e5445930c0ec567a2d533407ec135ec50",
+    "src/molcraft/losses/spec.py": "a9754827d128db0df6679f8cda0500116e6f2ee52075c27e29962d0c66e95939",
+    "src/molcraft/sampling/__init__.py": "91cdc45a4f70cf3877317afba794ecb187aa19b513851b4aa1e8a81ad425ec8e",
+    "src/molcraft/sampling/boltz2.py": "3a10d223f8da60ff36fc35c0881c6f66aab9355273fe7da09b5f3bbe10a190cf",
+    "src/molcraft/sampling/schedules.py": "fceb0fc089add5d7ecd5c5e2ce21c24c917903622bd6017709f922077f78eeda",
+    "src/molcraft/sampling/core.py": "08c852299349d1b9fe0c14a1b8842ba37fbcc47fd5ebe0d5eb842ebe30c21a65",
+    "scripts/test_model.py": "6d8e359b8f0131045eb8276db2a6e685606fc267cf085ac5e3f7557044b0921b"
+  },
+  "model_test_commit": "891e8d47c913068d415492d82c48035596d8ee4b",
+  "runtime_sources_match_model_test_commit": true
+}
