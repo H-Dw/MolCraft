@@ -217,14 +217,21 @@ def prepare_complex(spec):
         for name in ligand_names:
             graph_matches_native(graph, molecules[name])
             molecules[name] = _reference_conformer(molecules[name], spec.conformer_seed)
-        raw = Boltz2Featurizer().process(tokenized, molecules=molecules,
-            random=np.random.default_rng(spec.conformer_seed), training=False,
-            max_atoms=None, max_tokens=None, max_seqs=const.max_msa_seqs,
-            pad_to_max_seqs=False, single_sequence_prop=0.0, compute_frames=True,
-            compute_constraint_features=True, compute_affinity=False)
-        # Native affinity uses the query-only profile, not the structure MSA average.
-        raw.update(process_msa_features(tokenized, random=np.random.default_rng(spec.conformer_seed),
-            max_seqs_batch=1, max_seqs=1, pad_to_max_seqs=False, affinity=True))
+        import torch
+        # The native featurizer randomly rotates/translates reference conformers
+        # with CPU Torch RNG, independently of its NumPy Generator argument.
+        # Seed that stream and restore caller state without touching GPU RNGs.
+        with torch.random.fork_rng(devices=[]):
+            generator = torch.Generator(device="cpu").manual_seed(spec.conformer_seed)
+            torch.set_rng_state(generator.get_state())
+            raw = Boltz2Featurizer().process(tokenized, molecules=molecules,
+                random=np.random.default_rng(spec.conformer_seed), training=False,
+                max_atoms=None, max_tokens=None, max_seqs=const.max_msa_seqs,
+                pad_to_max_seqs=False, single_sequence_prop=0.0, compute_frames=True,
+                compute_constraint_features=True, compute_affinity=False)
+            # Affinity uses the native query-only profile.
+            raw.update(process_msa_features(tokenized, random=np.random.default_rng(spec.conformer_seed),
+                max_seqs_batch=1, max_seqs=1, pad_to_max_seqs=False, affinity=True))
         features = {k: np.asarray(v)[None] for k, v in raw.items()}
         features["affinity_token_mask"] = ((features["asym_id"] == chain_ids[spec.ligand_chain_id])
                                              & (features["token_pad_mask"] > 0.5)).astype(np.float32)
