@@ -6,7 +6,10 @@
 
 | 检查 | 结果 | 证据边界 |
 |---|---|---|
-| CPU 测试 | **59 passed，1 deselected**，11.76 s | 被排除的是真实模型集成测试 |
+| CPU 测试（初次验收） | **59 passed，1 deselected**，11.76 s | 被排除的是真实模型集成测试 |
+| DTK 兼容修复后 CPU 测试 | **60 passed，1 deselected**，12.71 s | 增加 reduced SVD 梯度回归检查 |
+| JAX 0.6.0 CPU 兼容测试 | **60 passed，1 deselected**，12.85 s | 独立环境，NumPy 2.2.6；不代表 DCU 模型通过 |
+| Python 3.11 语法兼容检查 | 36 个源码／脚本文件通过 | AST 语法检查；远端运行另行验证 |
 | Ruff 静态检查 | 通过 | 覆盖 src、tests、examples |
 | Python 3.12 编译检查 | 通过 | 不表示真实权重加载成功 |
 | Linux wheel 构建 | 通过 | 包含 Mosaic、Joltz、Boltz 许可证 |

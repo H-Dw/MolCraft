@@ -16,7 +16,8 @@ the included selector is deterministic and does not call an LLM service.
 
 ## Linux CPU installation
 
-Python 3.12 is required. Run from this repository in Linux or WSL:
+Python 3.11 or 3.12 is supported; the CPU lock was validated on 3.12.
+Run from this repository in Linux or WSL:
 
 ```bash
 uv venv --python python3.12
@@ -38,6 +39,9 @@ The local acceptance environment is also available inside WSL at
 The CPU lock file is an environment snapshot, not a lock for the optional model stack.
 
 ## Real backend (implemented; real-model validation not run)
+
+For the existing Python 3.11 / DTK 26.04 deployment, follow
+[the remote runtime instructions](docs/remote_dtk.md), which preserve its vendor JAX.
 
 Install `.[boltz2]` in a dedicated Linux environment. Supply local structure and
 affinity checkpoints plus the native CCD/molecule resources in the configuration.

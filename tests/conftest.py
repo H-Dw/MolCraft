@@ -1,9 +1,10 @@
-"""CPU acceptance must not initialize a GPU backend or load real checkpoints."""
+"""CPU acceptance is isolated; explicitly opted-in model tests retain the device."""
 
 import os
 
-os.environ["JAX_PLATFORMS"] = "cpu"
-os.environ["CUDA_VISIBLE_DEVICES"] = ""
+if os.environ.get("MOLCRAFT_RUN_MODEL_TESTS") != "1":
+    os.environ["JAX_PLATFORMS"] = "cpu"
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
 import numpy as np  # noqa: E402
 import pytest  # noqa: E402

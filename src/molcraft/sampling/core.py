@@ -57,7 +57,9 @@ def _kabsch(x, target, mask):
     x_c = x - (x * w).sum(0) / total
     target_mean = (target * w).sum(0) / total
     cov = jnp.einsum("ni,nj->ij", w * (target - target_mean), x_c, precision="highest")
-    u, _, vh = jnp.linalg.svd(cov)
+    # The covariance is 3x3. Reduced SVD has the same forward dimensions and
+    # supports JVP/VJP on the DTK JAX 0.6 runtime (full SVD does not).
+    u, _, vh = jnp.linalg.svd(cov, full_matrices=False)
     flip = jnp.eye(3).at[2, 2].set(jnp.linalg.det(u @ vh))
     return x_c, u @ flip @ vh, target_mean
 

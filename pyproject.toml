@@ -7,7 +7,7 @@ name = "molcraft-local"
 version = "0.1.0"
 description = "Gradient-informed, chemically constrained ligand edit proposals"
 readme = "README.md"
-requires-python = "==3.12.*"
+requires-python = ">=3.11,<3.13"
 license = "MIT"
 license-files = ["LICENSE", "third_party/*.LICENSE", "third_party/NOTICE.md"]
 dependencies = ["numpy>=2.1", "PyYAML>=6.0.2", "rdkit>=2024.9.1"]
@@ -36,7 +36,7 @@ addopts = "-ra -m 'not model_integration'"
 markers = ["model_integration: requires real Boltz weights; never run in CPU acceptance"]
 
 [tool.ruff]
-target-version = "py312"
+target-version = "py311"
 line-length = 100
 
 [tool.ruff.lint]

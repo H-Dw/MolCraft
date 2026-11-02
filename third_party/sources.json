@@ -5,8 +5,8 @@
     "source": "src/mosaic/sampling/core.py",
     "destination": "src/molcraft/sampling/core.py",
     "source_sha256": "653026fe1695ec551ff88847e5970ce62c23496d1687be62ca12240a1eec6f5c",
-    "adaptation": "Local namespace; annotations-only Joltz import for the model adapter.",
-    "destination_sha256": "653026fe1695ec551ff88847e5970ce62c23496d1687be62ca12240a1eec6f5c"
+    "adaptation": "Reduced SVD for DTK JAX 0.6 JVP compatibility; forward matrix dimensions unchanged.",
+    "destination_sha256": "08c852299349d1b9fe0c14a1b8842ba37fbcc47fd5ebe0d5eb842ebe30c21a65"
   },
   {
     "repository": "escalante-bio/mosaic",

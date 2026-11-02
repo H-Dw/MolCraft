@@ -1,0 +1,26 @@
+# Small synthetic target for runtime acceptance, not an affinity benchmark.
+# All resources must already exist; feature preparation is offline.
+proteins:
+  - {chain_id: A, sequence: ACDEFGHIKLMN}
+ligand: {chain_id: L, smiles: CCC}
+pocket:
+  - {chain_id: A, position: 2}
+  - {chain_id: A, position: 5}
+model_paths:
+  structure_checkpoint: /root/opt/mosaic-cache/boltz/boltz2_conf.ckpt
+  affinity_checkpoint: /root/opt/mosaic-cache/boltz/boltz2_aff.ckpt
+  ccd_path: /root/opt/mosaic-cache/boltz/ccd.pkl
+  molecule_dir: /root/opt/mosaic-cache/boltz/mols
+objective:
+  affinity_weight: 1.0
+  contact_weight: 2.5
+  confidence_weight: 2.5
+  geometry_weight: 1.0
+proposal:
+  temperature: 1.0
+  max_bundle_size: 2
+run:
+  gradient_mode: through_structure
+  sampling_steps: 25
+  trunk_passes: 1
+  seed: 0

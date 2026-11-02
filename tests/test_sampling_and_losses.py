@@ -11,6 +11,24 @@ from molcraft.chemistry.mapping import AtomLayout
 from molcraft.errors import ConfigurationError
 
 
+def test_kabsch_requests_reduced_svd_for_jax06(monkeypatch):
+    from molcraft.sampling.core import rigid_align
+
+    original = jnp.linalg.svd
+    requested = []
+
+    def checked(*args, **kwargs):
+        requested.append(kwargs.get("full_matrices", True))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(jnp.linalg, "svd", checked)
+    x = jnp.array([[0., 0., 0.], [1., 0., 0.], [0., 2., 0.], [0., 0., 3.]])
+    y = x + jnp.array([1., 2., 3.])
+    grad = jax.grad(lambda z: jnp.sum(rigid_align(z, y, jnp.ones(4)) ** 2))(x)
+    assert np.isfinite(grad).all()
+    assert requested and not any(requested)
+
+
 class ToyDenoiser(eqx.Module):
     chemistry: jax.Array
 
