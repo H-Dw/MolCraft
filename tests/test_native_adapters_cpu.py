@@ -66,8 +66,8 @@ def test_native_writer_uses_structures_subdirectory_and_raw_atom_shapes(tmp_path
             self.output = output_dir
 
         def write_on_batch_end(self, _trainer, _module, pred, _indices, batch, _idx, _loader):
-            assert pred["coords"].shape == (1, 1, 6, 3)
-            assert pred["masks"].shape == (1, 1, 6)
+            assert pred["coords"].shape == (1, 6, 3)
+            assert pred["masks"].shape == (1, 6)
             assert batch["record"][0].id == "complex"
             path = self.output / "complex" / "complex_model_0.cif"
             path.parent.mkdir(parents=True)

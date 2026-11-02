@@ -103,9 +103,10 @@ class NativeWriter:
         output = self.root / "native_export"
         writer = native.BoltzWriter(data_dir=self.processed_dir / "structures", output_dir=output,
                                     output_format="mmcif", boltz2=True)
-        coords = np.asarray(coordinates).reshape(1, 1, -1, 3)
+        # Native writer adds its own record axis to [samples, atoms, xyz].
+        coords = np.asarray(coordinates).reshape(1, -1, 3)
         pred = {"exception": False, "coords": torch.tensor(coords),
-                "masks": torch.tensor(self.atom_mask).reshape(1, 1, -1),
+                "masks": torch.tensor(self.atom_mask).reshape(1, -1),
                 "confidence_score": torch.ones(1)}
         writer.write_on_batch_end(None, None, pred, None, {"record": [self.record]}, None, None)
         destination = Path(path)
