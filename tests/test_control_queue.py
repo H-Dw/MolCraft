@@ -164,4 +164,5 @@ def test_sync_prefers_official_git_without_rate_limited_api(tmp_path,monkeypatch
     monkeypatch.setattr(queue.urllib.request,"urlopen",lambda *a,**k:pytest.fail("API must not be required"))
     assert queue.sync_code(tmp_path,sha,io.StringIO(),tmp_path/"cpu-env/bin/python")==sha
     assert any("--is-ancestor" in c for c in calls)
-    assert any("env -u LD_LIBRARY_PATH" in str(c) and "cpu-env/bin/python" in str(c) for c in calls)
+    assert any("env -u LD_LIBRARY_PATH" in str(c) and "cpu-env/bin/python" in str(c)
+               and "JAX_ENABLE_X64=1" in str(c) for c in calls)

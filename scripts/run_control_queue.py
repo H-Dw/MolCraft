@@ -147,9 +147,9 @@ def sync_code(root, required_commit, log, cpu_python):
     subprocess.run(["git", "merge-base", "--is-ancestor", required_commit, latest],
                    cwd=root, check=True, timeout=15)
     # All native CPU tests must pass on the actual downloaded checkout, without probing DCU.
-    # The vendor DTK CPU GEMM path is not a supported numerical reference.
-    # Keep official CPU JAX in an isolated venv; never replace the DCU environment.
-    cpu = ("env -u LD_LIBRARY_PATH JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES='' "
+    # This host's float32 CPU GEMM is unreliable for some small shapes, including
+    # with official jaxlib. Use x64 CPU acceptance; leave DCU precision untouched.
+    cpu = ("env -u LD_LIBRARY_PATH JAX_PLATFORMS=cpu JAX_ENABLE_X64=1 CUDA_VISIBLE_DEVICES='' "
            "HIP_VISIBLE_DEVICES='' ROCR_VISIBLE_DEVICES='' PYTHONPATH=" + shlex.quote(str(root / "src")) +
            " " + shlex.quote(str(cpu_python)) + " -m pytest -q -m 'not model_integration' " +
            shlex.quote(str(root / "tests")))
