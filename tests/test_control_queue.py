@@ -145,3 +145,22 @@ def test_another_scheduler_holding_lock_prevents_duplicate(tmp_path):
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         with pytest.raises(BlockingIOError):
             queue.run(path)
+
+
+def test_sync_prefers_official_git_without_rate_limited_api(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    import io
+    sha="a"*40
+    calls=[]
+
+    def command(args,**kwargs):
+        calls.append(args)
+        if "ls-remote" in args:
+            assert "credential.helper=" in args and kwargs["env"]["GIT_TERMINAL_PROMPT"]=="0"
+            return SimpleNamespace(stdout=sha+"\trefs/heads/main\n")
+        return SimpleNamespace(stdout="")
+
+    monkeypatch.setattr(queue.subprocess,"run",command)
+    monkeypatch.setattr(queue.urllib.request,"urlopen",lambda *a,**k:pytest.fail("API must not be required"))
+    assert queue.sync_code(tmp_path,sha,io.StringIO())==sha
+    assert any("--is-ancestor" in c for c in calls)

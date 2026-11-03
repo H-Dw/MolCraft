@@ -123,11 +123,23 @@ def active_optimizations(proc=Path("/proc")):
 
 
 def sync_code(root, required_commit, log):
-    request = urllib.request.Request(
-        "https://api.github.com/repos/H-Dw/MolCraft/commits/main",
-        headers={"User-Agent": "MolCraft-control-queue"})
-    with urllib.request.urlopen(request, timeout=25) as response:
-        latest = json.load(response)["sha"]
+    try:
+        # Prefer official Git refs: the shared-IP unauthenticated API can be rate limited.
+        refs = subprocess.run(["git", "-c", "credential.helper=", "-c", "http.extraHeader=",
+                               "-c", "http.version=HTTP/1.1", "ls-remote",
+                               "https://github.com/H-Dw/MolCraft.git", "refs/heads/main"],
+                              capture_output=True, text=True, check=True, timeout=25,
+                              env={**os.environ, "GIT_TERMINAL_PROMPT": "0",
+                                   "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null"})
+        latest, ref = refs.stdout.split()
+        if ref != "refs/heads/main":
+            raise ValueError("Official Git ref is not main")
+    except (subprocess.SubprocessError, OSError, ValueError):
+        request = urllib.request.Request(
+            "https://api.github.com/repos/H-Dw/MolCraft/commits/main",
+            headers={"User-Agent": "MolCraft-control-queue"})
+        with urllib.request.urlopen(request, timeout=25) as response:
+            latest = json.load(response)["sha"]
     if len(latest) != 40 or any(c not in "0123456789abcdef" for c in latest):
         raise ValueError("Invalid official main commit")
     subprocess.run(["bash", str(root / "scripts/sync_optagent.sh"), latest],
