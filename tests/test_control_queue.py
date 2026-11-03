@@ -101,7 +101,7 @@ def test_queue_continues_after_failed_agent_and_runs_argmax(tmp_path,monkeypatch
            "msa_mode":"single_sequence"} for name,strategy in [("agent","optagent"),("control","argmax")]]
     manifest={"work_root":str(tmp_path),"queue_dir":"queue","not_before_epoch":0,
               "memory_threshold":.1,"poll_seconds":1800,"pci_bus":"0000:0f:00.0",
-              "required_commit":commit,"jobs":jobs}
+              "required_commit":commit,"cpu_python":"cpu-env/bin/python","jobs":jobs}
     path=tmp_path/"manifest.json"
     path.write_text(json.dumps(manifest))
     monkeypatch.setattr(queue,"read_memory",lambda *a:{"fraction":0.01})
@@ -162,5 +162,6 @@ def test_sync_prefers_official_git_without_rate_limited_api(tmp_path,monkeypatch
 
     monkeypatch.setattr(queue.subprocess,"run",command)
     monkeypatch.setattr(queue.urllib.request,"urlopen",lambda *a,**k:pytest.fail("API must not be required"))
-    assert queue.sync_code(tmp_path,sha,io.StringIO())==sha
+    assert queue.sync_code(tmp_path,sha,io.StringIO(),tmp_path/"cpu-env/bin/python")==sha
     assert any("--is-ancestor" in c for c in calls)
+    assert any("env -u LD_LIBRARY_PATH" in str(c) and "cpu-env/bin/python" in str(c) for c in calls)

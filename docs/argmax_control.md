@@ -38,7 +38,7 @@ bash scripts/run_optagent.sh prepare-example --case vdr-3a2i \
 
 `scripts/run_control_queue.py` 是标准库独立调度器，可复制到 outputs 下运行而不修改活跃任务源码。
 它读取任务清单：work_root、queue_dir、not_before_epoch、pci_bus、memory_threshold、poll_seconds、
-required_commit、gba_source_config、model_dir 和四条 jobs（id、case、strategy、msa_mode、config、output、existing）。
+required_commit、cpu_python、gba_source_config、model_dir 和四条 jobs（id、case、strategy、msa_mode、config、output、existing）。
 清单不保存 SSH 密码或 API 密钥；Agent 继承服务器既有环境，argmax 不需要 API 密钥。
 
 首次到期时间为北京时间 2026-11-04 07:33，保存绝对时刻，重启不重新开始六小时倒计时。
@@ -51,7 +51,7 @@ required_commit、gba_source_config、model_dir 和四条 jobs（id、case、str
 保持全队列与轨迹锁，并通过 PID 和进程起始时间识别幸存子进程，避免断线或调度器重启造成重复运行。
 
 首个门控通过后查询 GitHub 官方 main，复用 sync_optagent.sh 快进到该 SHA，确认包含 required_commit。
-在实际检出的版本执行 CPU 测试后固定该批次提交；同步失败等待 30 分钟，不运行旧代码。
+在实际检出的版本使用独立的官方 CPU JAX 环境执行测试后固定该批次提交；同步失败等待 30 分钟，不运行旧代码。
 运行中不改变 checkout；工作树脏或后续 SHA 变化时拒绝启动。模型环境保持原 DTK 版本。
 任务失败独立记录并继续后续任务，绝不自动改成另一策略。失败重试和恢复由检查点及请求回执约束。
 
@@ -59,3 +59,8 @@ queue_state.json 与日志保留定时状态，comparison.json/CSV 汇总全部�
 这些数据包含完成/失败状态、版本、输入哈希、接受编辑数、实际复评数、分数和结构输出引用。
 仅比较一个随机种子的计算轨迹，不代表实验活性或统计显著性。
 调度器脱离 SSH 与本地客户端运行；服务器实例重启后需要重新启动同一调度器以恢复。
+
+服务器 DTK 0.6.0 的 CPU 矩阵乘法探针出现不正确数值，导致四项原有特征映射测试失败；
+这些失败与新增 argmax 无关。官方 CPU JAX 0.6.2 验收环境独立放在队列目录的 cpu-env，
+不更换实际 DCU 生成所用的 DTK JAX，也不跳过失败测试。CPU 测试入口清除 LD_LIBRARY_PATH，
+防止混用厂商动态库；远端原生 VDR 特征准备仍已在原模型环境核验。

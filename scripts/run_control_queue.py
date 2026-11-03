@@ -122,7 +122,7 @@ def active_optimizations(proc=Path("/proc")):
     return found
 
 
-def sync_code(root, required_commit, log):
+def sync_code(root, required_commit, log, cpu_python):
     try:
         # Prefer official Git refs: the shared-IP unauthenticated API can be rate limited.
         refs = subprocess.run(["git", "-c", "credential.helper=", "-c", "http.extraHeader=",
@@ -147,10 +147,12 @@ def sync_code(root, required_commit, log):
     subprocess.run(["git", "merge-base", "--is-ancestor", required_commit, latest],
                    cwd=root, check=True, timeout=15)
     # All native CPU tests must pass on the actual downloaded checkout, without probing DCU.
-    cpu = ("source /root/opt/mosaic/activate_dtk.sh && "
-           "export JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES='' HIP_VISIBLE_DEVICES='' "
-           "ROCR_VISIBLE_DEVICES='' && export PYTHONPATH=" + shlex.quote(str(root / "src")) +
-           " && python -m pytest -q -m 'not model_integration' " + shlex.quote(str(root / "tests")))
+    # The vendor DTK CPU GEMM path is not a supported numerical reference.
+    # Keep official CPU JAX in an isolated venv; never replace the DCU environment.
+    cpu = ("env -u LD_LIBRARY_PATH JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES='' "
+           "HIP_VISIBLE_DEVICES='' ROCR_VISIBLE_DEVICES='' PYTHONPATH=" + shlex.quote(str(root / "src")) +
+           " " + shlex.quote(str(cpu_python)) + " -m pytest -q -m 'not model_integration' " +
+           shlex.quote(str(root / "tests")))
     subprocess.run(["bash", "-lc", cpu], cwd=root, stdout=log, stderr=subprocess.STDOUT,
                    check=True, timeout=600)
     return latest
@@ -288,7 +290,8 @@ def run(manifest_path):
                 try:
                     persist("syncing_code", memory=memory)
                     with (destination / "sync.log").open("a") as log:
-                        commit = sync_code(root, manifest["required_commit"], log)
+                        commit = sync_code(root, manifest["required_commit"], log,
+                                           inside(root, manifest["cpu_python"]))
                     state["synced_commit"] = commit
                 except Exception as exc:
                     persist("waiting_code_sync", error=f"{type(exc).__name__}: {exc}",
