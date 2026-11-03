@@ -95,7 +95,12 @@ def _read_msa(case, source):
         raise ConfigurationError("Cannot read the designated AF3 A3M member") from exc
 
 
-def prepare_example(case_id, output, model_dir, *, msa_source=None, work_root="."):
+def prepare_example(case_id, output, model_dir, *, msa_source=None, work_root=".",
+                    msa_mode="provided"):
+    if msa_mode not in {"provided", "single_sequence"}:
+        raise ConfigurationError("Unknown MSA mode")
+    if msa_mode == "single_sequence" and msa_source is not None:
+        raise ConfigurationError("single_sequence mode cannot import an MSA")
     case = case_data(case_id)
     output = task_path(work_root, output)
     output.mkdir(parents=True, exist_ok=True)
@@ -109,25 +114,33 @@ def prepare_example(case_id, output, model_dir, *, msa_source=None, work_root=".
         "sequences": [{"proteinChain": {"sequence": sequence, "count": 1,
                                         "useStructureTemplate": False}}],
     }], task_path(work_root, output / "af3_protein_request.json"))
-    if msa_source is None:
+    if msa_source is None and msa_mode == "provided":
         return {"status": "awaiting_af3_msa", "case": case_id}
-    raw, archive_sha = _read_msa(case, msa_source)
-    sha = hashlib.sha256(raw).hexdigest()
-    if case.get("msa_sha256") and sha != case["msa_sha256"]:
-        raise ConfigurationError("GBA A3M does not match the pinned AF3 export")
-    msa, raw_count, used_count = normalized_a3m(raw, sequence)
-    path = task_path(work_root, output / "input.a3m")
-    task_path(work_root, output / "original.a3m").write_bytes(raw)
-    path.write_bytes(msa)
-    metadata = {"status": "ready", "case": case_id, "source": "AF3 Server unpaired A3M",
-                "archive_sha256": archive_sha, "source_sha256": sha,
-                "msa_sha256": hashlib.sha256(msa).hexdigest(),
-                "sequence_sha256": case["sequence_sha256"],
-                "raw_depth": raw_count, "input_depth": used_count}
+    if msa_mode == "provided":
+        raw, archive_sha = _read_msa(case, msa_source)
+        sha = hashlib.sha256(raw).hexdigest()
+        if case.get("msa_sha256") and sha != case["msa_sha256"]:
+            raise ConfigurationError("GBA A3M does not match the pinned AF3 export")
+        msa, raw_count, used_count = normalized_a3m(raw, sequence)
+        path = task_path(work_root, output / "input.a3m")
+        task_path(work_root, output / "original.a3m").write_bytes(raw)
+        path.write_bytes(msa)
+        metadata = {"status": "ready", "case": case_id, "source": "AF3 Server unpaired A3M",
+                    "archive_sha256": archive_sha, "source_sha256": sha,
+                    "msa_sha256": hashlib.sha256(msa).hexdigest(),
+                    "sequence_sha256": case["sequence_sha256"],
+                    "raw_depth": raw_count, "input_depth": used_count}
+    else:
+        metadata = {"status": "ready", "case": case_id, "source": "single_sequence",
+                    "sequence_sha256": case["sequence_sha256"], "raw_depth": 1, "input_depth": 1,
+                    "msa_service_called": False}
     save_json(metadata, task_path(work_root, output / "msa-provenance.json"))
     model_dir = Path(model_dir).resolve()
+    protein = {"chain_id": "A", "sequence": sequence}
+    if msa_mode == "provided":
+        protein["msa_path"] = "input.a3m"
     base = {
-        "proteins": [{"chain_id": "A", "sequence": sequence, "msa_path": "input.a3m"}],
+        "proteins": [protein],
         "ligand": {"chain_id": "L", "smiles": "C" * case["heavy_atoms"]},
         "pocket": [{"chain_id": "A", "position": i} for i in case["pocket"]],
         "model_paths": {name: str(model_dir / path) for name, path in {
@@ -135,7 +148,7 @@ def prepare_example(case_id, output, model_dir, *, msa_source=None, work_root=".
             "ccd_path": "ccd.pkl", "molecule_dir": "mols",
         }.items()},
         "run": {"gradient_mode": "through_structure", "sampling_steps": 25, "trunk_passes": 1,
-                "seed": 0},
+                "seed": 0, "msa_mode": msa_mode},
     }
     for profile in ("test", "mosaic-like"):
         formal = profile == "mosaic-like"

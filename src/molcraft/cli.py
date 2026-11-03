@@ -122,7 +122,7 @@ def _prepare_example(args):
     from molcraft.io.examples import prepare_example
 
     result = prepare_example(args.case, args.output, args.model_dir, msa_source=args.msa,
-                             work_root=args.work_root)
+                             work_root=args.work_root, msa_mode=args.msa_mode)
     print(json.dumps(result, indent=2))
 
 
@@ -148,6 +148,8 @@ def _optimize(args):
     config = load_config(task_path(args.work_root, args.config))
     config = replace(config, complex=replace(config.complex, cache_dir=temp))
     for protein in config.complex.proteins:
+        if config.msa_mode == "single_sequence":
+            continue
         if protein.msa_path is None:
             raise ConfigurationError("Optimization requires a verified local AF3 A3M")
         msa = task_path(args.work_root, protein.msa_path)
@@ -163,27 +165,26 @@ def _optimize(args):
             raise ConfigurationError("AF3 MSA differs from the verified example import")
 
     import jax
-    from molcraft.agent.deepseek import DeepSeekClient, ProviderError
-    from molcraft.agent.optagent import OptAgent
+    from molcraft.agent.argmax import create_agent
+    from molcraft.agent.deepseek import ProviderError
     from molcraft.optimization import optimize
 
     devices = jax.devices()
     if not devices or devices[0].platform != "gpu":
         raise ConfigurationError("The optimization CLI requires an actual GPU/DCU device")
-    client = DeepSeekClient()
-    if not client.available():
-        raise ProviderError("DeepSeek models endpoint did not list deepseek-flash")
+    agent, provider_metadata = create_agent(config.optimization.strategy)
     import subprocess
     git = subprocess.run(["git", "-C", str(Path(args.work_root).resolve()), "rev-parse", "HEAD"],
                          capture_output=True, text=True, check=False)
     save_json({"device": str(devices[0]), "kind": devices[0].device_kind,
                "jax": jax.__version__, "commit": git.stdout.strip() or None,
-               "api_models_http": 200, "model": client.model}, output / "runtime.json")
+               "strategy": config.optimization.strategy, "msa_mode": config.msa_mode,
+               **provider_metadata}, output / "runtime.json")
 
     def event(row):
         print(json.dumps({"unix_time": time.time(), **row}), flush=True)
 
-    state = optimize(config, OptAgent(client), output, resume=args.resume,
+    state = optimize(config, agent, output, resume=args.resume,
                      stop_after=args.stop_after, on_event=event)
     print(json.dumps({"status": state["status"], "next_round": state["next_round"],
                       "checkpoint": str(output / "checkpoint.json")}), flush=True)
@@ -217,6 +218,7 @@ def main(argv=None):
     example = commands.add_parser("prepare-example", help="Prepare a DBMol example with local AF3 MSA")
     example.add_argument("--case", default="vdr-3a2i", choices=("vdr-3a2i", "gba-2v3d"))
     example.add_argument("--msa")
+    example.add_argument("--msa-mode", choices=("provided", "single_sequence"), default="provided")
     example.add_argument("--output", required=True)
     example.add_argument("--model-dir", required=True)
     example.add_argument("--work-root", default=".")

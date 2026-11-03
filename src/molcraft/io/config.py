@@ -36,8 +36,11 @@ class OptimizationSpec:
     min_rounds: int = 10
     patience: int = 5
     drafts: int = 10
+    strategy: str = "optagent"
 
     def __post_init__(self):
+        if self.strategy not in {"optagent", "argmax"}:
+            raise ConfigurationError("optimization.strategy must be optagent or argmax")
         values = (self.max_rounds, self.min_rounds, self.patience, self.drafts)
         if any(type(n) is not int or n < 1 for n in values):
             raise ConfigurationError("Optimization budgets must be positive integers")
@@ -56,6 +59,13 @@ class RunConfig:
     seed: int = 0
     evaluation: EvaluationSpec = field(default_factory=EvaluationSpec)
     optimization: OptimizationSpec = field(default_factory=OptimizationSpec)
+    msa_mode: str = "provided"
+
+    def __post_init__(self):
+        if self.msa_mode not in {"provided", "single_sequence"}:
+            raise ConfigurationError("run.msa_mode must be provided or single_sequence")
+        if self.msa_mode == "single_sequence" and any(p.msa_path for p in self.complex.proteins):
+            raise ConfigurationError("single_sequence mode cannot also supply an MSA path")
 
     @property
     def evaluation_sampling_steps(self):
@@ -87,7 +97,7 @@ def load_config(path):
             p.get("template_chain_id")) for p in data["proteins"])
         paths = ModelPaths(**{key: resolve(value) for key, value in data["model_paths"].items()})
         run = data.get("run", {})
-        if set(run) - {"gradient_mode", "sampling_steps", "trunk_passes", "seed"}:
+        if set(run) - {"gradient_mode", "sampling_steps", "trunk_passes", "seed", "msa_mode"}:
             raise ConfigurationError("Unknown run setting")
         ligand = data["ligand"]
         spec = ComplexSpec(proteins, ligand["smiles"],

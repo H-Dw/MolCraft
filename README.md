@@ -15,6 +15,7 @@ the included selector is deterministic and does not call an LLM service.
 - [本地验证报告](docs/validation.md)
 - [远端 DCU 实测报告](docs/dtk_validation.md)
 - [当前梯度策略、Mosaic/DBMol 对照与配置](docs/gradient_strategy_and_profiles.md)
+- [Agent / argmax 配对对照、单序列输入与延迟队列](docs/argmax_control.md)
 
 ## Linux CPU installation
 

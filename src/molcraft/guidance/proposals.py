@@ -212,7 +212,7 @@ def direction_tables(graph: MolecularGraph, evidence: GradientEvidence, policy: 
 
 
 def build_proposals(graph: MolecularGraph, evidence: GradientEvidence,
-                    policy: ProposalPolicy | None = None) -> ProposalPacket:
+                    policy: ProposalPolicy | None = None, *, excluded=()) -> ProposalPacket:
     policy = policy or ProposalPolicy()
     tables, raw, rejection_counts = direction_tables(graph, evidence, policy)
     primitives = []
@@ -229,6 +229,7 @@ def build_proposals(graph: MolecularGraph, evidence: GradientEvidence,
             bundles[tuple(op.key for op in ops)] = (ops, sa + sb, pa + pb)
     ordered = sorted(bundles.values(), key=lambda x: (x[1], tuple(op.key for op in x[0])))
     checked, valid, seen_graphs = 0, [], {graph.fingerprint}
+    excluded = set(excluded)
     for ops, score, log_prior in ordered[:policy.max_proposals]:
         checked += 1
         try:
@@ -239,6 +240,9 @@ def build_proposals(graph: MolecularGraph, evidence: GradientEvidence,
         if candidate_graph.fingerprint in seen_graphs:
             continue
         seen_graphs.add(candidate_graph.fingerprint)
+        if candidate_graph.smiles in excluded:
+            rejection_counts["previously_evaluated"] += 1
+            continue
         valid.append((ops, candidate_graph, score, log_prior))
     valid = valid[:policy.max_candidates]
     candidates = [EditCandidate("noop", graph.fingerprint, (), graph, 0.0)]

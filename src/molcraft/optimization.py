@@ -42,6 +42,11 @@ def _input_identity(config):
         inputs["molecule_dir"] = str(paths.molecule_dir.resolve())
     cfg = asdict(config)
     cfg["complex"].pop("cache_dir", None)
+    # Preserve the identity of published, default OptAgent checkpoints.
+    if cfg["optimization"]["strategy"] == "optagent":
+        cfg["optimization"].pop("strategy")
+    if cfg["msa_mode"] == "provided":
+        cfg.pop("msa_mode")
     return _digest({"version": 1, "config": cfg, "inputs": inputs}), inputs
 
 
@@ -87,6 +92,9 @@ def _run(config, agent, output, resume, stop_after, backend, evaluation_backend,
         if not resume:
             raise ConfigurationError("Run already exists; specify --resume")
         state = json.loads(path.read_text(encoding="utf-8"))
+        if (state.get("strategy", "optagent") != config.optimization.strategy
+                or state.get("msa_mode", "provided") != config.msa_mode):
+            raise StaleProposalError("Checkpoint strategy or MSA mode differs from current inputs")
         if state["context_id"] != key:
             raise StaleProposalError("Checkpoint context differs from current inputs")
         if state["status"] in {"converged", "budget_complete"}:
@@ -95,6 +103,7 @@ def _run(config, agent, output, resume, stop_after, backend, evaluation_backend,
         raise ConfigurationError("No checkpoint exists to resume")
     else:
         state = {"context_id": key, "input_hashes": inputs, "next_round": 1, "rounds": [],
+                 "strategy": config.optimization.strategy, "msa_mode": config.msa_mode,
                  "no_accept": 0, "graph": graph0.to_dict(), "status": "ready",
                  "budget": asdict(config.optimization), "external_metrics": {
                      "af3": "not_evaluated", "vina": "not_evaluated"}}
@@ -108,6 +117,9 @@ def _run(config, agent, output, resume, stop_after, backend, evaluation_backend,
                                           config.evaluation_trunk_passes)
     event({"phase": "reference_features"})
     with prepare(config.complex) as initial:
+        shape = np.shape(initial.features.get("msa"))
+        if config.msa_mode == "single_sequence" and (len(shape) < 3 or shape[1] != 1):
+            raise ConfigurationError("single_sequence mode requires exactly one query MSA row")
         reference_layout = initial.layout
         gradient_noise = backend.draw_noise(initial, config.seed)
         evaluation_noise = evaluation_backend.draw_noise(initial, config.seed)
@@ -139,6 +151,12 @@ def _run(config, agent, output, resume, stop_after, backend, evaluation_backend,
                     evidence = value_and_grad(prepared, config.objective, config.gradient_mode,
                                               noise, config.seed, backend)
                 save_json({**evidence.to_dict(), "context_id": context}, evidence_path)
+                if not (output / "feature_profile.json").exists():
+                    save_json({"strategy": config.optimization.strategy, "msa_mode": config.msa_mode,
+                               "msa_shape": list(np.shape(prepared.features.get("msa"))),
+                               "sequence_lengths": [len(p.sequence) for p in spec.proteins],
+                               "homolog_msa_supplied": any(p.msa_path for p in spec.proteins)},
+                              output / "feature_profile.json")
                 last_evidence = evidence
                 excluded = {smiles for row in state["rounds"] if row.get("source") == source
                             for smiles in row.get("evaluated_smiles", [])}
@@ -171,6 +189,7 @@ def _run(config, agent, output, resume, stop_after, backend, evaluation_backend,
         improved = result["selected_id"] != "noop"
         state["no_accept"] = 0 if improved else state["no_accept"] + 1
         row = {"round": index, "source": source, "status": result["status"],
+               "strategy": config.optimization.strategy, "msa_mode": config.msa_mode,
                "selected_id": result["selected_id"], "loss": result["selected_loss"],
                "baseline_loss": result["baseline"]["loss"],
                "evaluated_smiles": [packet.candidate(c["candidate_id"]).graph.smiles
