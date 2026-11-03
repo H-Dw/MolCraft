@@ -153,9 +153,7 @@ class ProposalPacket:
         return result
 
 
-def build_proposals(graph: MolecularGraph, evidence: GradientEvidence,
-                    policy: ProposalPolicy | None = None) -> ProposalPacket:
-    policy = policy or ProposalPolicy()
+def direction_tables(graph: MolecularGraph, evidence: GradientEvidence, policy: ProposalPolicy):
     evidence.validate(graph)
     if not set(policy.frozen_atom_ids) <= set(graph.atom_ids):
         raise ConfigurationError("Frozen atom IDs must belong to the source molecule")
@@ -210,6 +208,13 @@ def build_proposals(graph: MolecularGraph, evidence: GradientEvidence,
         tables[kind] = ProbabilityTable(ids, labels, scores[kind], allowed, probabilities, reasons)
         tables[kind].validate()
 
+    return tables, raw, rejection_counts
+
+
+def build_proposals(graph: MolecularGraph, evidence: GradientEvidence,
+                    policy: ProposalPolicy | None = None) -> ProposalPacket:
+    policy = policy or ProposalPolicy()
+    tables, raw, rejection_counts = direction_tables(graph, evidence, policy)
     primitives = []
     for kind in ("atom", "bond", "charge"):
         primitives.extend(sorted(raw[kind], key=lambda x: (x[1], x[0].key))[:policy.per_channel])

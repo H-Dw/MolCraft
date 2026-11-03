@@ -76,3 +76,22 @@
 - **EditSelector**：只选择已有候选 ID。首版 GreedySelector 为可执行参考接口，不代表 LLM 已接入或分数已经改善。
 
 概率是温度与先验控制的一阶偏好，不是校准过的化学后验或实验成功概率。实际效果需按算法 3 重新评分。
+# Algorithm — OptAgent discrete trajectory
+
+**Require.** A fixed receptor and pocket, verified AF3 MSA, a legal mapped ligand, frozen Boltz-2 weights, a profile and a run directory.
+
+**Ensure.** A checkpoint for the last accepted graph, every completed round and the scoring provenance.
+
+```text
+01  Lock context and reference noise for both model depths       ▷ 固定输入、模型和随机量参考
+02  Resume or initialize G, round index and acceptance history  ▷ 核验上下文后恢复合法图
+03  For each remaining round r                                  ▷ 以配置的轮数上限约束搜索
+04      Compute or replay ∇L at G                               ▷ 在当前 one-hot 图上取得三通道导数
+05      Retrieve cases and allocate eligible local anchors      ▷ 提供功能团上下文与案例
+06      Request bounded drafts with persisted attempt receipts  ▷ 为每次调用保留预算与回执
+07      Validate whole bundles, deduplicate and score Δfeatures ▷ 以实际合法图计算方向偏好
+08      Ask for verified IDs and replay candidates at eval depth ▷ 在同随机量条件下复评
+09      Accept the best eligible graph or keep G                ▷ 按实际联合损失和亲和力约束决定
+10      Commit the round and apply the stopping rule             ▷ 原子写入轨迹状态并判断是否收敛
+11  Return the checkpoint and candidate artifacts               ▷ 返回已完成轮次与分子结构
+```

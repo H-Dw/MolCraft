@@ -7,8 +7,8 @@
 
 ```bash
 source /root/opt/mosaic/activate_dtk.sh
-git clone https://github.com/H-Dw/MolCraft.git /root/opt/MolCraft
-cd /root/opt/MolCraft
+git clone https://github.com/H-Dw/MolCraft.git /workspace/MolCraft
+cd /workspace/MolCraft
 # 已部署时使用 git pull --ff-only；不覆盖本地改动。
 python -m pip install --no-deps --no-build-isolation .
 molcraft doctor
@@ -36,3 +36,18 @@ editable 构建额外需要 `editables` 而无法安装；已有 hatchling 足�
 本次兼容修复：允许 Python 3.11／3.12；Kabsch 的 3×3 协方差使用 reduced SVD，
 在保持前向维度一致的同时避开旧 JAX 对 full SVD 的 JVP 限制。
 远端实测状态以实际生成的运行报告为准，不能引用先前 Mosaic 的通过结果代替。
+
+OptAgent 从交互式 Bash 启动以继承现有网络与 `DEEPSEEK_API_KEY`。用官方
+SHA 调用 `scripts/sync_optagent.sh` 核验检出。工作目录和输入约束见
+[OptAgent PLAN](optagent_plan.md)。以下三次运行依次准备 GBA、执行校准配置、
+执行首个正式轮次。输入可以是原始 AF3 ZIP 或其中校验一致的未配对 A3M。
+
+```bash
+bash --noprofile -ic 'cd /workspace/MolCraft && bash scripts/run_optagent.sh prepare-example --case gba-2v3d --msa outputs/optagent-gba/gba-af3.a3m --output outputs/optagent-gba/input --model-dir /root/opt/mosaic-cache/boltz'
+bash --noprofile -ic 'cd /workspace/MolCraft && bash scripts/run_optagent.sh optimize --config outputs/optagent-gba/input/test.yaml --output outputs/optagent-gba/test'
+bash --noprofile -ic 'cd /workspace/MolCraft && bash scripts/run_optagent.sh optimize --config outputs/optagent-gba/input/mosaic-like.yaml --output outputs/optagent-gba/formal --stop-after 1'
+```
+
+正式校准后，沿用同一输出目录和配置，传入 `--resume` 继续。轮次、接受状态和
+模型输入哈希在 `checkpoint.json`，实际发出的 Agent 请求在每轮 `requests` 回执中。
+VDR 执行 `prepare-example --case vdr-3a2i` 可生成 259 aa 的 AF3 蛋白任务。

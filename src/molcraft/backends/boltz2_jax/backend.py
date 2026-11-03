@@ -31,6 +31,27 @@ def _compiled_functions():
             eqx.filter_jit(_model_objective))
 
 
+def _pocket_distances(output, layout):
+    xyz = np.asarray(output.coordinates).reshape((-1, layout.total_atoms, 3))[0]
+    ligand = xyz[list(layout.ligand_atom_indices)]
+    return np.stack([np.linalg.norm(xyz[list(group)][:, None] - ligand[None], axis=-1).min(axis=0)
+                     for group in layout.pocket_atom_groups])
+
+
+def _readouts(output, distances):
+    nearest = distances.min(axis=1)
+    bcov = float(np.mean(nearest <= 3.5))
+    affinity = float(output.affinity["affinity_pred_value"])
+    probability = output.affinity.get("affinity_probability_binary")
+    if probability is None:
+        probability = np.exp(-np.logaddexp(0.0, -float(output.affinity["affinity_logits_binary"])))
+    return {"affinity_pred_value": affinity,
+            "affinity_probability_binary": float(probability),
+            "ligand_iptm": float(output.confidence["ligand_iptm"]),
+            "bcov": bcov, "dist": float(nearest.mean()),
+            "boltz2_success": float(affinity < 0 and bcov > 0.5)}
+
+
 @dataclass
 class Boltz2Backend:
     bundle: object
@@ -78,10 +99,12 @@ class Boltz2Backend:
         inputs = ChemistryInputs(*(jnp.asarray(x) for x in encode_graph(prepared.graph)))
         arguments = self._arguments(prepared, objective, gradient_mode, noise, noise_seed)
         compute_grad, _ = _compiled_functions()
-        (value, (metrics, _output)), gradient = compute_grad(inputs, *arguments)
+        (value, (metrics, output)), gradient = compute_grad(inputs, *arguments)
         if not np.isfinite(np.asarray(value)).all():
             raise GradientError("Model returned a non-finite objective")
         scalar_metrics = {k: float(np.asarray(v)) for k, v in metrics.items()}
+        distances = _pocket_distances(output, prepared.layout)
+        scalar_metrics.update(_readouts(output, distances))
         result = GradientEvidence(prepared.graph.fingerprint, prepared.graph.atom_ids,
             np.asarray(gradient.atoms), np.asarray(gradient.bonds), np.asarray(gradient.charges),
             scalar_metrics, gradient_mode, noise_seed,
@@ -89,7 +112,8 @@ class Boltz2Backend:
              "coordinate_confidence_bins": "native_hard_bins",
              "affinity_mw_correction": False,
              "gradient_norms": {name: float(np.linalg.norm(np.asarray(g))) for name, g in
-                                zip(("atom", "bond", "charge"), gradient)}})
+                                zip(("atom", "bond", "charge"), gradient)}},
+            tuple(float(d) for d in distances.min(axis=0)))
         result.validate(prepared.graph)
         jax.block_until_ready(value)
         return result
@@ -104,7 +128,9 @@ class Boltz2Backend:
         value, (metrics, output) = compute(inputs, *arguments)
         if not np.isfinite(np.asarray(value)).all():
             raise GradientError("Candidate model evaluation returned a non-finite objective")
-        return {"loss": float(value), "metrics": {k: float(v) for k, v in metrics.items()},
+        scalars = {k: float(v) for k, v in metrics.items()}
+        scalars.update(_readouts(output, _pocket_distances(output, prepared.layout)))
+        return {"loss": float(value), "metrics": scalars,
                 "coordinates": np.asarray(output.coordinates),
                 "ligand_coordinates": prepared.layout.ligand_coordinates(output.coordinates)[0]}
 

@@ -193,7 +193,7 @@ def _prepare_complex(spec):
         from boltz.data.tokenize.boltz2 import Boltz2Tokenizer
     except ImportError as exc:
         raise ConfigurationError("Install the pinned .[boltz2] extra in a dedicated Linux environment") from exc
-    temporary = TemporaryDirectory(prefix="molcraft-")
+    temporary = TemporaryDirectory(prefix="molcraft-", dir=spec.cache_dir)
     root = Path(temporary.name)
     try:
         sequence_specs = [{"protein": {"id": p.chain_id, "sequence": p.sequence,

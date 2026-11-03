@@ -40,7 +40,7 @@ class ComplexSpec:
     pocket: tuple[ResidueRef, ...]
     model_paths: ModelPaths | None = None
     ligand_chain_id: str = "L"
-    cache_dir: Path = field(default_factory=lambda: Path("~/.cache/molcraft").expanduser())
+    cache_dir: Path | None = None
     conformer_seed: int = 0
 
     def __post_init__(self):
@@ -96,6 +96,7 @@ class GradientEvidence:
     gradient_mode: str = "synthetic"
     noise_seed: int = 0
     metadata: dict = field(default_factory=dict)
+    pocket_distances: tuple[float, ...] = ()
 
     def validate(self, graph):
         from .errors import StaleProposalError
@@ -116,5 +117,6 @@ class GradientEvidence:
             "bond_grad": np.asarray(self.bond_grad).tolist(),
             "charge_grad": np.asarray(self.charge_grad).tolist(),
             "metrics": self.metrics, "gradient_mode": self.gradient_mode,
+            "pocket_distances": list(self.pocket_distances),
             "noise_seed": self.noise_seed, "metadata": self.metadata,
         }

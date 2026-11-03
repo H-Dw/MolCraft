@@ -57,16 +57,19 @@ def evaluate_candidate(prepared, candidate, noise=None, objective=None, noise_se
         result["candidate_fingerprint"] = actual.fingerprint
         result["candidate_id"] = candidate.candidate_id
         if export_dir is not None:
-            from pathlib import Path
-            from molcraft.io.serialization import write_ligand_sdf
-
-            output = Path(export_dir)
-            output.mkdir(parents=True, exist_ok=True)
-            write_ligand_sdf(actual, result["ligand_coordinates"], output / "ligand.sdf")
-            updated.native_writer(result["coordinates"], output / "complex.cif")
-            result["artifacts"] = {"ligand": str(output / "ligand.sdf"),
-                                    "complex": str(output / "complex.cif")}
+            result["artifacts"] = export_prediction(updated, actual, result, export_dir)
         return result
+
+
+def export_prediction(prepared, graph, result, export_dir):
+    from pathlib import Path
+    from molcraft.io.serialization import write_ligand_sdf
+
+    output = Path(export_dir)
+    output.mkdir(parents=True, exist_ok=True)
+    write_ligand_sdf(graph, result["ligand_coordinates"], output / "ligand.sdf")
+    prepared.native_writer(result["coordinates"], output / "complex.cif")
+    return {"ligand": str(output / "ligand.sdf"), "complex": str(output / "complex.cif")}
 
 
 __all__ = ["prepare_complex", "value_and_grad", "build_proposals", "evaluate_candidate"]

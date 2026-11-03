@@ -27,4 +27,10 @@ def evaluate_candidate(*args, **kwargs):
     return evaluate(*args, **kwargs)
 
 
-__all__ = ["prepare_complex", "value_and_grad", "build_proposals", "evaluate_candidate"]
+def optimize(*args, **kwargs):
+    from .optimization import optimize as search
+
+    return search(*args, **kwargs)
+
+
+__all__ = ["prepare_complex", "value_and_grad", "build_proposals", "evaluate_candidate", "optimize"]

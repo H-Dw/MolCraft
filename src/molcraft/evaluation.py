@@ -2,8 +2,9 @@
 
 from pathlib import Path
 import math
+import time
 
-from molcraft.errors import ConfigurationError, GradientError, StaleProposalError
+from molcraft.errors import ChemistryError, ConfigurationError, GradientError, StaleProposalError
 
 
 def _scores(result):
@@ -14,7 +15,8 @@ def _scores(result):
     return {"loss": loss, "metrics": metrics}
 
 
-def evaluate_packet(prepared, packet, config, *, backend=None, export_dir=None):
+def evaluate_packet(prepared, packet, config, *, backend=None, export_dir=None,
+                    selected_ids=None, noise=None, context_id=None):
     """Rescore at one shared depth/noise and recommend at most one legal next graph.
 
     The baseline is recomputed here; a 25-step gradient loss is never compared
@@ -23,6 +25,18 @@ def evaluate_packet(prepared, packet, config, *, backend=None, export_dir=None):
     """
     if packet.source_graph.fingerprint != prepared.graph.fingerprint:
         raise StaleProposalError("Packet belongs to another source molecule")
+    if packet.diagnostics.get("context_id") != context_id:
+        raise StaleProposalError("Packet belongs to a different optimization context")
+    if selected_ids is not None:
+        if len(selected_ids) > config.evaluation.candidate_budget or len(set(selected_ids)) != len(selected_ids):
+            raise ConfigurationError("Candidate IDs must be unique and within the evaluation budget")
+        candidates = [packet.candidate(candidate_id) for candidate_id in selected_ids]
+        if any(not c.operations for c in candidates):
+            raise ConfigurationError("The unchanged source is already included as the baseline")
+    else:
+        candidates = sorted((c for c in packet.candidates if c.operations),
+                            key=lambda c: (-c.probability, c.predicted_change, c.candidate_id))
+        candidates = candidates[:config.evaluation.candidate_budget]
     config.objective.validate(config.gradient_mode)
     if config.evaluation.require_affinity_nonworsening and config.objective.affinity_weight == 0:
         raise ConfigurationError("The affinity acceptance guard requires an active affinity loss")
@@ -35,21 +49,34 @@ def evaluate_packet(prepared, packet, config, *, backend=None, export_dir=None):
         raise ConfigurationError("Evaluation backend depth does not match the configuration")
     from molcraft.api import evaluate_candidate
 
-    noise = backend.draw_noise(prepared, config.seed)
-    baseline = _scores(backend.evaluate(prepared, config.objective, config.seed, noise))
+    if noise is None:
+        noise = backend.draw_noise(prepared, config.seed)
+    started = time.monotonic()
+    baseline_result = backend.evaluate(prepared, config.objective, config.seed, noise)
+    baseline = _scores(baseline_result)
+    baseline["seconds"] = time.monotonic() - started
+    if export_dir is not None and selected_ids is not None and prepared.native_writer is not None:
+        from molcraft.api import export_prediction
+
+        baseline["artifacts"] = export_prediction(prepared, prepared.graph, baseline_result,
+                                                 Path(export_dir) / "baseline")
     guard = config.evaluation.require_affinity_nonworsening
     if guard and "affinity_loss" not in baseline["metrics"]:
         raise GradientError("Baseline is missing affinity_loss required by the acceptance guard")
-    candidates = sorted((c for c in packet.candidates if c.operations),
-                        key=lambda c: (-c.probability, c.predicted_change, c.candidate_id))
-    candidates = candidates[:config.evaluation.candidate_budget]
-    measured = []
+    measured, rejected = [], []
     selected_graph, selected_id, best_loss = prepared.graph, "noop", baseline["loss"]
     for index, candidate in enumerate(candidates, 1):
         # Packet IDs are data, not filesystem paths. Use a local numeric directory.
         destination = Path(export_dir) / f"evaluation-{index:04d}" if export_dir is not None else None
-        result = evaluate_candidate(prepared, candidate, noise=noise, objective=config.objective,
-            noise_seed=config.seed, backend=backend, export_dir=destination)
+        started = time.monotonic()
+        try:
+            result = evaluate_candidate(prepared, candidate, noise=noise, objective=config.objective,
+                noise_seed=config.seed, backend=backend, export_dir=destination)
+        except ChemistryError as exc:
+            if selected_ids is None:
+                raise
+            rejected.append({"candidate_id": candidate.candidate_id, "error": str(exc)})
+            continue
         scores = _scores(result)
         if guard and "affinity_loss" not in scores["metrics"]:
             raise GradientError("Candidate is missing affinity_loss required by the acceptance guard")
@@ -60,6 +87,7 @@ def evaluate_packet(prepared, packet, config, *, backend=None, export_dir=None):
             "predicted_change": candidate.predicted_change,
             "actual_change": scores["loss"] - baseline["loss"],
             "eligible": eligible, "affinity_guard_passed": affinity_ok,
+            "seconds": time.monotonic() - started,
             "operations": [op.to_dict() for op in candidate.operations],
             "artifacts": result.get("artifacts", {})})
         if eligible and scores["loss"] < best_loss:
@@ -69,5 +97,6 @@ def evaluate_packet(prepared, packet, config, *, backend=None, export_dir=None):
         "evaluation": {"candidate_budget": config.evaluation.candidate_budget,
             "evaluated_candidates": len(measured), "sampling_steps": steps, "trunk_passes": passes,
             "seed": config.seed, "require_affinity_nonworsening": guard},
-        "candidates": measured, "selected_id": selected_id, "selected_graph": selected_graph.to_dict(),
+        "candidates": measured, "unscored_candidates": rejected,
+        "selected_id": selected_id, "selected_graph": selected_graph.to_dict(),
         "selected_loss": best_loss}

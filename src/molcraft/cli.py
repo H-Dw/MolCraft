@@ -4,8 +4,10 @@ import argparse
 import importlib.metadata
 import importlib.util
 import json
+import os
 from pathlib import Path
 import sys
+import time
 
 from molcraft.errors import MolCraftError
 
@@ -116,6 +118,79 @@ def _evaluate_set(args):
                           "selected_loss": result["selected_loss"]}, indent=2))
 
 
+def _prepare_example(args):
+    from molcraft.io.examples import prepare_example
+
+    result = prepare_example(args.case, args.output, args.model_dir, msa_source=args.msa,
+                             work_root=args.work_root)
+    print(json.dumps(result, indent=2))
+
+
+def _optimize(args):
+    from dataclasses import replace
+    import hashlib
+
+    from molcraft.errors import ConfigurationError
+    from molcraft.io.config import load_config
+    from molcraft.io.examples import a3m_records, task_path
+    from molcraft.io.serialization import save_json
+
+    output = task_path(args.work_root, args.output)
+    cache = task_path(args.work_root, output / "cache")
+    temp = task_path(args.work_root, output / "tmp")
+    for directory in (cache, temp):
+        directory.mkdir(parents=True, exist_ok=True)
+    for name in ("TMPDIR", "TMP", "TEMP"):
+        os.environ[name] = str(temp)
+    for name in ("XDG_CACHE_HOME", "JAX_COMPILATION_CACHE_DIR", "HF_HOME", "PIP_CACHE_DIR"):
+        os.environ[name] = str(cache)
+    os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
+    config = load_config(task_path(args.work_root, args.config))
+    config = replace(config, complex=replace(config.complex, cache_dir=temp))
+    for protein in config.complex.proteins:
+        if protein.msa_path is None:
+            raise ConfigurationError("Optimization requires a verified local AF3 A3M")
+        msa = task_path(args.work_root, protein.msa_path)
+        raw = msa.read_bytes()
+        records = a3m_records(raw, protein.sequence)
+        if not 2 <= len(records) <= 1024:
+            raise ConfigurationError("Optimization requires 2 to 1024 aligned AF3 MSA rows")
+        provenance = task_path(args.work_root, msa.with_name("msa-provenance.json"))
+        metadata = json.loads(provenance.read_text(encoding="utf-8"))
+        if (metadata.get("msa_sha256") != hashlib.sha256(raw).hexdigest()
+                or metadata.get("input_depth") != len(records)
+                or metadata.get("sequence_sha256") != hashlib.sha256(protein.sequence.encode()).hexdigest()):
+            raise ConfigurationError("AF3 MSA differs from the verified example import")
+
+    import jax
+    from molcraft.agent.deepseek import DeepSeekClient, ProviderError
+    from molcraft.agent.optagent import OptAgent
+    from molcraft.optimization import optimize
+
+    devices = jax.devices()
+    if not devices or devices[0].platform != "gpu":
+        raise ConfigurationError("The optimization CLI requires an actual GPU/DCU device")
+    client = DeepSeekClient()
+    if not client.available():
+        raise ProviderError("DeepSeek models endpoint did not list deepseek-flash")
+    import subprocess
+    git = subprocess.run(["git", "-C", str(Path(args.work_root).resolve()), "rev-parse", "HEAD"],
+                         capture_output=True, text=True, check=False)
+    save_json({"device": str(devices[0]), "kind": devices[0].device_kind,
+               "jax": jax.__version__, "commit": git.stdout.strip() or None,
+               "api_models_http": 200, "model": client.model}, output / "runtime.json")
+
+    def event(row):
+        print(json.dumps({"unix_time": time.time(), **row}), flush=True)
+
+    state = optimize(config, OptAgent(client), output, resume=args.resume,
+                     stop_after=args.stop_after, on_event=event)
+    print(json.dumps({"status": state["status"], "next_round": state["next_round"],
+                      "checkpoint": str(output / "checkpoint.json")}), flush=True)
+    if state["status"] == "provider_interrupted":
+        raise ProviderError(state["error"])
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="molcraft")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -139,6 +214,20 @@ def main(argv=None):
     evaluate_set.add_argument("--packet", required=True)
     evaluate_set.add_argument("--output", required=True)
     evaluate_set.set_defaults(func=_evaluate_set)
+    example = commands.add_parser("prepare-example", help="Prepare a DBMol example with local AF3 MSA")
+    example.add_argument("--case", default="vdr-3a2i", choices=("vdr-3a2i", "gba-2v3d"))
+    example.add_argument("--msa")
+    example.add_argument("--output", required=True)
+    example.add_argument("--model-dir", required=True)
+    example.add_argument("--work-root", default=".")
+    example.set_defaults(func=_prepare_example)
+    search = commands.add_parser("optimize", help="Run a restartable OptAgent trajectory on GPU/DCU")
+    search.add_argument("--config", required=True)
+    search.add_argument("--output", required=True)
+    search.add_argument("--work-root", default=".")
+    search.add_argument("--stop-after", type=int)
+    search.add_argument("--resume", action="store_true")
+    search.set_defaults(func=_optimize)
     args = parser.parse_args(argv)
     try:
         args.func(args)

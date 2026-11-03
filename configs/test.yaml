@@ -36,3 +36,4 @@ evaluation:
   sampling_steps: 25
   trunk_passes: 1
   require_affinity_nonworsening: false
+optimization: {max_rounds: 1, min_rounds: 1, patience: 1, drafts: 2}

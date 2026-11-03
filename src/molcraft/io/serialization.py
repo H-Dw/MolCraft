@@ -1,7 +1,9 @@
 """Strict JSON packets and mapped SDF coordinates."""
 
 import json
+import os
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 import numpy as np
 
 from molcraft.guidance.proposals import ProposalPacket
@@ -11,8 +13,22 @@ from molcraft.errors import MappingError
 def save_json(data, path):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
-                    encoding="utf-8", newline="\n")
+    payload = json.dumps(data, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
+    with NamedTemporaryFile(dir=path.parent, prefix=".molcraft-", suffix=".tmp",
+                            mode="w", encoding="utf-8", newline="\n", delete=False) as handle:
+        temporary = Path(handle.name)
+        try:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        except BaseException:
+            handle.close()
+            temporary.unlink(missing_ok=True)
+            raise
+    try:
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def save_packet(packet, path):

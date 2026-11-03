@@ -13,3 +13,7 @@ Native frame-mask/pTM logic is adapted in `backends/boltz2_jax/confidence.py`.
 
 The DBMol contact objective follows arXiv:2607.19237v1. MolCraft's constrained
 gradient-to-probability editing workflow is an extension, not a reproduction claim.
+
+## SynCraft-Core
+
+The reasoning examples are vendored from catalystforyou/SynCraft-Core, commit 557703e110b26a354afed2955ded5217837f6692 under the MIT license. See syncraft.LICENSE. The vendored reasoning.json SHA-256 is cc7f4c3755e848c103026b0f3b2efa406fd36d5f5432618e92dab3518f52352c.

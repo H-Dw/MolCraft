@@ -31,6 +31,21 @@ class EvaluationSpec:
 
 
 @dataclass(frozen=True)
+class OptimizationSpec:
+    max_rounds: int = 25
+    min_rounds: int = 10
+    patience: int = 5
+    drafts: int = 10
+
+    def __post_init__(self):
+        values = (self.max_rounds, self.min_rounds, self.patience, self.drafts)
+        if any(type(n) is not int or n < 1 for n in values):
+            raise ConfigurationError("Optimization budgets must be positive integers")
+        if self.min_rounds > self.max_rounds:
+            raise ConfigurationError("Optimization min_rounds exceeds max_rounds")
+
+
+@dataclass(frozen=True)
 class RunConfig:
     complex: ComplexSpec
     objective: ObjectiveSpec
@@ -40,6 +55,7 @@ class RunConfig:
     trunk_passes: int = 1
     seed: int = 0
     evaluation: EvaluationSpec = field(default_factory=EvaluationSpec)
+    optimization: OptimizationSpec = field(default_factory=OptimizationSpec)
 
     @property
     def evaluation_sampling_steps(self):
@@ -55,7 +71,8 @@ def load_config(path):
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ConfigurationError("Configuration must be a YAML mapping")
-    allowed = {"proteins", "ligand", "pocket", "model_paths", "objective", "proposal", "run", "evaluation"}
+    allowed = {"proteins", "ligand", "pocket", "model_paths", "objective", "proposal", "run",
+               "evaluation", "optimization"}
     if set(data) - allowed:
         raise ConfigurationError(f"Unknown configuration sections: {sorted(set(data) - allowed)}")
 
@@ -84,7 +101,9 @@ def load_config(path):
         evaluation = EvaluationSpec(**data.get("evaluation", {}))
         if evaluation.require_affinity_nonworsening and objective.affinity_weight == 0:
             raise ConfigurationError("The affinity acceptance guard requires an active affinity loss")
-        result = RunConfig(spec, objective, policy, evaluation=evaluation, **run)
+        optimization = OptimizationSpec(**data.get("optimization", {}))
+        result = RunConfig(spec, objective, policy, evaluation=evaluation,
+                           optimization=optimization, **run)
         objective.validate(result.gradient_mode)
         if (type(result.sampling_steps) is not int or result.sampling_steps < 1
                 or type(result.trunk_passes) is not int or result.trunk_passes < 1
