@@ -46,6 +46,22 @@ def inside(root, relative):
     return path
 
 
+def cpu_interpreter(root, relative):
+    """Validate the environment directory while preserving its Python symlink.
+
+    A virtualenv's executable normally links to Python outside the workspace.
+    Resolving that link would both reject the environment and bypass its packages.
+    Output/configuration paths still use the stricter inside() check.
+    """
+    relative = Path(relative)
+    if relative.name not in {"python", "python3"}:
+        raise ValueError("CPU interpreter must be named python or python3")
+    path = inside(root, relative.parent) / relative.name
+    if not path.is_file() or not os.access(path, os.X_OK):
+        raise ValueError("CPU environment interpreter is not executable")
+    return path
+
+
 def file_sha(path):
     with Path(path).open("rb") as handle:
         return hashlib.file_digest(handle, "sha256").hexdigest()
@@ -288,10 +304,10 @@ def run(manifest_path):
                 continue
             if not state.get("synced_commit"):
                 try:
-                    persist("syncing_code", memory=memory)
+                    persist("syncing_code", memory=memory, error=None)
                     with (destination / "sync.log").open("a") as log:
                         commit = sync_code(root, manifest["required_commit"], log,
-                                           inside(root, manifest["cpu_python"]))
+                                           cpu_interpreter(root, manifest["cpu_python"]))
                     state["synced_commit"] = commit
                 except Exception as exc:
                     persist("waiting_code_sync", error=f"{type(exc).__name__}: {exc}",

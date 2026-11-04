@@ -63,5 +63,7 @@ queue_state.json 与日志保留定时状态，comparison.json/CSV 汇总全部�
 服务器 CPU 的 float32 小型矩阵乘法探针出现不正确数值，导致四项原有特征映射测试失败；
 官方 JAX 0.6.2 CPU 环境也能复现。使用同一环境的 x64 CPU 验收后，106 项测试全部通过。
 官方 CPU 验收环境独立放在队列目录的 cpu-env，清除 LD_LIBRARY_PATH，设置 JAX_ENABLE_X64=1。
+CPU 解释器校验保留虚拟环境中的 Python 链接，仅要求其所在目录位于工作区内；
+该链接正常指向工作区外的基础 Python。输入、输出路径仍执行完整的解析后边界检查。
 不更换实际 DCU 生成所用的 DTK JAX，也不改变 DCU 精度或跳过测试。
 远端原生 VDR 特征准备仍已在原模型环境核验。

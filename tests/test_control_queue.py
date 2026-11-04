@@ -2,6 +2,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -41,6 +42,22 @@ def test_process_identity_and_path_boundaries(tmp_path):
     (tmp_path/"escape").symlink_to(tmp_path.parent)
     with pytest.raises(ValueError):
         queue.inside(tmp_path,"escape/outside")
+
+
+def test_cpu_interpreter_keeps_virtualenv_symlink_and_rejects_directory_escape(tmp_path):
+    binary=tmp_path/"cpu-env/bin/python"
+    binary.parent.mkdir(parents=True)
+    binary.symlink_to(sys.executable)
+    selected=queue.cpu_interpreter(tmp_path,"cpu-env/bin/python")
+    assert selected==binary and selected.is_symlink()
+    assert selected.resolve()==Path(sys.executable).resolve()
+    with pytest.raises(ValueError):
+        queue.inside(tmp_path,"cpu-env/bin/python")
+    (tmp_path/"escaped-env").symlink_to(binary.parent.parent.parent.parent)
+    with pytest.raises(ValueError):
+        queue.cpu_interpreter(tmp_path,"escaped-env/bin/python")
+    with pytest.raises(ValueError):
+        queue.cpu_interpreter(tmp_path,"cpu-env/bin/missing")
 
 
 @pytest.mark.parametrize("due,memory,reason,wait",[
@@ -104,9 +121,17 @@ def test_queue_continues_after_failed_agent_and_runs_argmax(tmp_path,monkeypatch
               "required_commit":commit,"cpu_python":"cpu-env/bin/python","jobs":jobs}
     path=tmp_path/"manifest.json"
     path.write_text(json.dumps(manifest))
+    binary=tmp_path/"cpu-env/bin/python"
+    binary.parent.mkdir(parents=True)
+    binary.symlink_to(sys.executable)
     monkeypatch.setattr(queue,"read_memory",lambda *a:{"fraction":0.01})
     monkeypatch.setattr(queue,"active_optimizations",lambda:[])
-    monkeypatch.setattr(queue,"sync_code",lambda *a:commit)
+
+    def sync(root,required,log,cpu_python):
+        assert cpu_python==binary and cpu_python.is_symlink()
+        return commit
+
+    monkeypatch.setattr(queue,"sync_code",sync)
     monkeypatch.setattr(queue.subprocess,"run",lambda *a,**k:None)
     monkeypatch.setattr(queue.subprocess,"check_output",lambda *a,**k:commit)
     launched=[]
