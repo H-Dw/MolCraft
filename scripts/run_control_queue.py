@@ -226,6 +226,8 @@ def summarize(root, manifest, state, destination):
                   "trajectory_status": checkpoint.get("status"), "completed_rounds": len(rounds),
                   "accepted_edits": sum(r["status"] == "improved" for r in rounds),
                   "candidate_evaluations": sum(r.get("evaluated_candidates", 0) for r in rounds),
+                  "candidate_attempts": sum(r.get("attempted_candidates", r.get("evaluated_candidates", 0)) for r in rounds),
+                  "candidate_rejections": sum(r.get("rejected_candidates", 0) for r in rounds),
                   "commit": runtime.get("commit"), "input_hashes": checkpoint.get("input_hashes"),
                   "final_graph": checkpoint.get("graph"), "seconds": sum(r["seconds"] for r in rounds),
                   "llm_requests": len(list(output.glob("round-*/requests/*.json"))),
@@ -241,7 +243,8 @@ def summarize(root, manifest, state, destination):
     write_json(destination / "comparison.json", {"single_seed": True, "targets_use_different_msa_modes": True,
                "affinity_is_predicted_not_experimental": True, "trajectories": records})
     fields = ["job", "strategy", "msa_mode", "queue_status", "trajectory_status", "completed_rounds",
-              "accepted_edits", "candidate_evaluations", "final_loss", "seconds", "llm_requests", "commit", "error"]
+              "accepted_edits", "candidate_evaluations", "candidate_attempts", "candidate_rejections",
+              "final_loss", "seconds", "llm_requests", "commit", "error"]
     with (destination / "comparison.csv").open("w", encoding="utf-8-sig", newline="") as handle:
         writer = csv.DictWriter(handle, fields, extrasaction="ignore")
         writer.writeheader()

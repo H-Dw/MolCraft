@@ -159,7 +159,7 @@ def _run(config, agent, output, resume, stop_after, backend, evaluation_backend,
                               output / "feature_profile.json")
                 last_evidence = evidence
                 excluded = {smiles for row in state["rounds"] if row.get("source") == source
-                            for smiles in row.get("evaluated_smiles", [])}
+                            for smiles in row.get("attempted_smiles", row.get("evaluated_smiles", []))}
                 event({"phase": "propose", "round": index})
                 packet = agent.propose(graph, evidence, config.policy,
                     samples=config.optimization.drafts, round_index=index, context_id=context,
@@ -194,6 +194,11 @@ def _run(config, agent, output, resume, stop_after, backend, evaluation_backend,
                "baseline_loss": result["baseline"]["loss"],
                "evaluated_smiles": [packet.candidate(c["candidate_id"]).graph.smiles
                                     for c in result["candidates"]],
+               "attempted_smiles": [packet.candidate(c["candidate_id"]).graph.smiles
+                                    for c in [*result["candidates"], *result.get("unscored_candidates", [])]],
+               "attempted_candidates": len(result["candidates"]) + len(result.get("unscored_candidates", [])),
+               "rejected_candidates": len(result.get("unscored_candidates", [])),
+               "evaluation_protocol": result.get("evaluation", {}).get("protocol"),
                "evaluated_candidates": len(result["candidates"]),
                "legal_candidates": len(packet.candidates) - 1,
                "seconds": time.monotonic() - started}

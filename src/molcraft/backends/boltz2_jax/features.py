@@ -6,17 +6,19 @@ used. Native parsing/featurization is called directly with checked local assets.
 
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stdout
+import io
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import random
 import shutil
+import sys
 import numpy as np
 import yaml
 
 from molcraft.chemistry.graph import MolecularGraph
 from molcraft.chemistry.mapping import AtomLayout
-from molcraft.errors import ConfigurationError, MappingError, MissingAssetError
+from molcraft.errors import ConfigurationError, LigandPreparationError, MappingError, MissingAssetError
 from molcraft.types import PreparedComplex
 
 
@@ -128,10 +130,20 @@ def _reference_conformer(mol, seed):
     expanded.RemoveAllConformers()
     options = AllChem.ETKDGv3()
     options.randomSeed = int(seed)
-    if AllChem.EmbedMolecule(expanded, options) < 0:
-        options.useRandomCoords = True
-        if AllChem.EmbedMolecule(expanded, options) < 0:
-            raise ConfigurationError("Cannot generate the ligand reference conformer")
+    failures = []
+    for random_coordinates in (False, True):
+        options.useRandomCoords = random_coordinates
+        try:
+            if AllChem.EmbedMolecule(expanded, options) >= 0:
+                break
+            failures.append("ETKDG returned no conformer")
+        except (ValueError, RuntimeError) as exc:
+            # RDKit raises for some impossible bounds/valence geometries instead
+            # of returning -1. This is local to the ligand embedding operation.
+            failures.append(f"{type(exc).__name__}: {exc}")
+    else:
+        raise LigandPreparationError("Cannot generate the ligand reference conformer: "
+                                     + "; ".join(failures), stage="reference_conformer")
     has_uff_parameters = AllChem.UFFHasAllMoleculeParams(expanded)
     # UFF typing may change hybridization (notably P) and clear ring caches.
     # Rebuild rings after typing, before force-field construction.
@@ -144,6 +156,22 @@ def _reference_conformer(mol, seed):
     conformer.SetProp("name", "Computed")
     conformer.SetProp("coord_generation", "ETKDGv3")
     return result
+
+
+def _single_native_record(manifest, graph, preparation_log):
+    """Recognize the pinned parser's explicit ligand failure, never all empty inputs.
+
+    Boltz catches parser exceptions and returns an empty manifest. Only its exact
+    conformer-failure message for this ligand is a recoverable candidate error;
+    missing records for any other reason and ambiguous mappings remain fatal.
+    """
+    if len(manifest.records) == 0:
+        marker = f"Failed to compute 3D conformer for {graph.mapped_smiles}"
+        if marker in preparation_log:
+            raise LigandPreparationError(marker, stage="native_conformer")
+    if len(manifest.records) != 1:
+        raise MappingError("Exactly one native complex record is required")
+    return manifest.records[0]
 
 
 @contextmanager
@@ -212,21 +240,24 @@ def _prepare_complex(spec):
                               encoding="utf-8", newline="\n")
         # Restore host RNG state even if native preprocessing changes it.
         py_state, np_state = random.getstate(), np.random.get_state()
+        preparation_log = io.StringIO()
         try:
             random.seed(spec.conformer_seed)
             np.random.seed(spec.conformer_seed)
-            manifest = native.process_inputs(data=native.check_inputs(input_path), out_dir=root,
-                ccd_path=Path(spec.model_paths.ccd_path), mol_dir=Path(spec.model_paths.molecule_dir),
-                use_msa_server=False, msa_server_url="", msa_pairing_strategy="greedy", boltz2=True)
+            with redirect_stdout(preparation_log):
+                manifest = native.process_inputs(data=native.check_inputs(input_path), out_dir=root,
+                    ccd_path=Path(spec.model_paths.ccd_path), mol_dir=Path(spec.model_paths.molecule_dir),
+                    use_msa_server=False, msa_server_url="", msa_pairing_strategy="greedy", boltz2=True)
         finally:
             random.setstate(py_state)
             np.random.set_state(np_state)
+            # Preserve the original diagnostic; do not swallow native errors.
+            sys.stdout.write(preparation_log.getvalue())
+            sys.stdout.flush()
         processed = root / "processed"
         if manifest is None:
             manifest = native.Manifest.load(processed / "manifest.json")
-        if len(manifest.records) != 1:
-            raise MappingError("Exactly one native complex record is required")
-        record = manifest.records[0]
+        record = _single_native_record(manifest, graph, preparation_log.getvalue())
         input_data = load_input(record=record, target_dir=processed / "structures", msa_dir=processed / "msa",
             constraints_dir=processed / "constraints" if (processed / "constraints").exists() else None,
             template_dir=processed / "templates" if (processed / "templates").exists() else None,

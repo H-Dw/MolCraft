@@ -115,7 +115,8 @@ def test_legacy_identity_is_preserved_and_new_modes_are_distinct():
         OptimizationSpec(strategy="unknown")
 
 
-def test_argmax_trajectory_resume_and_cross_mode_rejection(tmp_path):
+@pytest.mark.parametrize("failed_candidate", [False, True])
+def test_argmax_trajectory_resume_and_cross_mode_rejection(tmp_path, failed_candidate):
     cfg = config()
 
     def prepare(spec):
@@ -139,12 +140,15 @@ def test_argmax_trajectory_resume_and_cross_mode_rejection(tmp_path):
         selected.extend(packet.candidate(i).graph.smiles for i in selected_ids)
         return {"selected_id":"noop", "selected_graph":prepared.graph.to_dict(),
                 "status":"source_retained", "selected_loss":1., "baseline":{"loss":1.},
-                "candidates":[{"candidate_id":i} for i in selected_ids]}
+                "candidates":[{"candidate_id":i} for i in (selected_ids[:-1] if failed_candidate else selected_ids)],
+                "unscored_candidates":[{"candidate_id":selected_ids[-1],"error":"no conformer"}] if failed_candidate else []}
 
     backend = Backend()
     args = dict(backend=backend, evaluation_backend=backend, prepare=prepare, score=score)
     first = optimize(cfg, ArgmaxAgent(), tmp_path, stop_after=1, **args)
     assert first["status"] == "window_complete"
+    assert first["rounds"][0]["attempted_candidates"] == 8
+    assert first["rounds"][0]["rejected_candidates"] == int(failed_candidate)
     last = optimize(cfg, ArgmaxAgent(), tmp_path, resume=True, **args)
     assert last["status"] == "converged" and last["next_round"] == 3
     assert len(set(selected)) == 16
