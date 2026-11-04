@@ -24,11 +24,11 @@ class ArgmaxAgent:
         return [c.candidate_id for c in ordered[:budget]]
 
 
-def create_agent(strategy):
+def create_agent(strategy, *, synthesis_policy=None):
     """Import and contact the LLM provider only for the explicitly selected strategy."""
     if strategy == "argmax":
         return ArgmaxAgent(), {"api_models_http": None, "model": None, "llm_calls": 0}
-    if strategy != "optagent":
+    if strategy not in {"optagent", "syncraft"}:
         raise ConfigurationError("Unknown optimization strategy")
     from .deepseek import DeepSeekClient, ProviderError
     from .optagent import OptAgent
@@ -36,4 +36,13 @@ def create_agent(strategy):
     client = DeepSeekClient()
     if not client.available():
         raise ProviderError("DeepSeek models endpoint did not list deepseek-flash")
+    if strategy == "syncraft":
+        from .syncraft import SynCraftAgent, UPSTREAM_COMMIT
+
+        agent = SynCraftAgent(client, policy=synthesis_policy)
+        return agent, {"api_models_http": 200, "model": client.model,
+                       "agent_protocol": agent.policy.protocol_version,
+                       "syncraft_source_commit": UPSTREAM_COMMIT,
+                       "synthesis_evidence": "motif_and_proxy_checked_not_retrosynthesis",
+                       "selection": "deterministic_synthesis_adjusted_top_k"}
     return OptAgent(client), {"api_models_http": 200, "model": client.model}

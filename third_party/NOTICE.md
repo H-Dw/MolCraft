@@ -17,3 +17,11 @@ gradient-to-probability editing workflow is an extension, not a reproduction cla
 ## SynCraft-Core
 
 The reasoning examples are vendored from catalystforyou/SynCraft-Core, commit 557703e110b26a354afed2955ded5217837f6692 under the MIT license. See syncraft.LICENSE. The Git blob of the vendored reasoning.json matches upstream and has SHA-256 ca42144e2444c9762ae18089eff08d9610a278363f52d9dc65536a1867b81239.
+
+The `syncraft` proposal protocol also adapts the synthesis-planning principles
+from that commit's `skill/SKILL.md`, `src/inference_enhanced.py`, and SA-ranking
+logic in `skill/syncraft/pipeline.py`. Exact source hashes are recorded in
+`syncraft_guidance_sources.json`; a reference copy of the upstream skill is in
+`syncraft_SKILL.md`. The packaged guidance is a MolCraft adaptation, with fixed
+atom IDs, group checks and synthesis proxies. It does not execute the upstream
+Vina/PLIP rescue pipeline or establish a validated synthesis route.

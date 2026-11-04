@@ -35,6 +35,12 @@ def _input_identity(config):
               for p in spec.proteins
               for name, path in (("msa", p.msa_path), ("template", p.template_path))
               if path}
+    if config.optimization.strategy == "syncraft":
+        from importlib.resources import files
+
+        for name in ("syncraft_synthesis_guidance.md", "syncraft_reasoning.json"):
+            resource = files("molcraft").joinpath("data", name)
+            inputs[name] = hashlib.sha256(resource.read_bytes()).hexdigest()
     if spec.model_paths:
         paths = spec.model_paths
         for name in ("structure_checkpoint", "affinity_checkpoint", "ccd_path"):
@@ -42,6 +48,9 @@ def _input_identity(config):
         inputs["molecule_dir"] = str(paths.molecule_dir.resolve())
     cfg = asdict(config)
     cfg["complex"].pop("cache_dir", None)
+    # A new, versioned protocol; old OptAgent/argmax identities remain intact.
+    if config.optimization.strategy != "syncraft":
+        cfg.pop("synthesis")
     # Preserve the identity of published, default OptAgent checkpoints.
     if cfg["optimization"]["strategy"] == "optagent":
         cfg["optimization"].pop("strategy")

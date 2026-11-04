@@ -1,0 +1,21 @@
+{
+  "repository": "https://github.com/catalystforyou/SynCraft-Core",
+  "commit": "557703e110b26a354afed2955ded5217837f6692",
+  "license": "MIT",
+  "files": [
+    {
+      "path": "skill/SKILL.md",
+      "sha256": "9d355ed8c1034c3b00f1cc7afb9d7c72ec8514c7f3393d08ff7901c87f61aacc"
+    },
+    {
+      "path": "src/inference_enhanced.py",
+      "sha256": "d438024812029cfa68e67869243ad2ede15dfcb332ca3d9e6d6d31abc2ace564"
+    },
+    {
+      "path": "skill/syncraft/pipeline.py",
+      "sha256": "0091f993549174321a134852352ccd84fdd5fa7aed27959e08ecb8221fd72d08"
+    }
+  ],
+  "adapted_runtime_resource": "src/molcraft/data/syncraft_synthesis_guidance.md",
+  "pipeline_scope": "guidance and synthesis proxies; no Vina/PLIP or retrosynthesis run"
+}

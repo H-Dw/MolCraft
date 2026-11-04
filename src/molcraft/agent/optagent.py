@@ -27,7 +27,7 @@ _GROUPS = {
 
 
 class SynCraftCases:
-    def __init__(self):
+    def __init__(self, *, synthesis_context=False):
         self.generator = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
         resource = files("molcraft").joinpath("data", "syncraft_reasoning.json")
         records = json.loads(resource.read_text(encoding="utf-8"))
@@ -45,6 +45,12 @@ class SynCraftCases:
                     "edit_types": sorted({op[0] for op in record["edits"]}),
                     "case_note": record["reasoning"][:600],
                 })
+                if synthesis_context:
+                    self.cases[-1].update(
+                        source=record["source"], edit_sequence=record["edits"],
+                        case_note=record["reasoning"][:2400],
+                        atom_id_namespace="case_only_do_not_copy_to_query",
+                        evidence_level="retrieved_analogy_not_verified_route")
         if len(self.cases) < 5:
             raise ConfigurationError("SynCraft case index has fewer than five molecules")
 

@@ -96,7 +96,9 @@ def _read_msa(case, source):
 
 
 def prepare_example(case_id, output, model_dir, *, msa_source=None, work_root=".",
-                    msa_mode="provided"):
+                    msa_mode="provided", strategy="syncraft"):
+    if strategy not in {"syncraft", "optagent", "argmax"}:
+        raise ConfigurationError("Unknown optimization strategy")
     if msa_mode not in {"provided", "single_sequence"}:
         raise ConfigurationError("Unknown MSA mode")
     if msa_mode == "single_sequence" and msa_source is not None:
@@ -157,7 +159,8 @@ def prepare_example(case_id, output, model_dir, *, msa_source=None, work_root=".
             "evaluation": {"candidate_budget": 8 if formal else 2,
                            "sampling_steps": 200 if formal else 25, "trunk_passes": 4 if formal else 1,
                            "require_affinity_nonworsening": formal},
-            "optimization": {"max_rounds": 25 if formal else 1, "min_rounds": 10 if formal else 1,
+            "optimization": {"strategy": strategy,
+                             "max_rounds": 25 if formal else 1, "min_rounds": 10 if formal else 1,
                              "patience": 5 if formal else 1, "drafts": 10 if formal else 2},
         }
         task_path(work_root, output / f"{profile}.yaml").write_text(

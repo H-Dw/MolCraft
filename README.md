@@ -4,8 +4,10 @@ Frozen Boltz-2 input gradients -> chemically constrained discrete ligand edits.
 
 MolCraft uses atom, undirected-bond and formal-charge derivatives to construct edit
 preferences. The current molecule remains discrete and valid. No DeFoG repair or
-continuous graph optimization is used. An Agent can consume the proposal packet;
-the included selector is deterministic and does not call an LLM service.
+continuous graph optimization is used. New example inputs use a SynCraft-guided
+LLM proposal mode with complete functional-group plans, synthesis-proxy checks,
+and deterministic candidate selection. Legacy OptAgent and no-LLM argmax remain
+available for reproducing earlier trajectories.
 
 ## Design and algorithms
 
@@ -16,6 +18,7 @@ the included selector is deterministic and does not call an LLM service.
 - [远端 DCU 实测报告](docs/dtk_validation.md)
 - [当前梯度策略、Mosaic/DBMol 对照与配置](docs/gradient_strategy_and_profiles.md)
 - [Agent / argmax 配对对照、单序列输入与延迟队列](docs/argmax_control.md)
+- [SynCraft 基团完整性与可合成性引导：审计、配置及边界](docs/syncraft_guidance.md)
 
 ## Linux CPU installation
 
@@ -86,5 +89,8 @@ The new `evaluation` section controls rescoring depth, candidate budget and an
 optional affinity-proxy nonworsening gate. The source baseline is recomputed at
 the same depth as candidates. `next_graph.json` contains the recommended graph,
 including its hydrogen editing policy; the input is not mutated. This is one
-round, with no automatic multi-round driver. The new preset/gating logic is CPU
-tested; its 200-step/four-pass ligand model path has not received GPU acceptance.
+round. Use `molcraft optimize` for a restartable multi-round Agent trajectory.
+`prepare-example --strategy syncraft` (the new default) enables the group-guided
+protocol; `--strategy optagent` and `--strategy argmax` reproduce the old paths.
+The new synthesis protocol has CPU acceptance; its optimization performance must
+be measured in fresh trajectories rather than mixed into earlier checkpoints.

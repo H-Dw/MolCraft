@@ -8,6 +8,7 @@ from molcraft.errors import ConfigurationError
 from molcraft.types import ComplexSpec, ModelPaths, ProteinSpec, ResidueRef
 from molcraft.losses.spec import ObjectiveSpec
 from molcraft.guidance.proposals import ProposalPolicy
+from molcraft.chemistry.synthesis import SynthesisPolicy
 
 
 @dataclass(frozen=True)
@@ -39,8 +40,8 @@ class OptimizationSpec:
     strategy: str = "optagent"
 
     def __post_init__(self):
-        if self.strategy not in {"optagent", "argmax"}:
-            raise ConfigurationError("optimization.strategy must be optagent or argmax")
+        if self.strategy not in {"optagent", "argmax", "syncraft"}:
+            raise ConfigurationError("optimization.strategy must be optagent, argmax or syncraft")
         values = (self.max_rounds, self.min_rounds, self.patience, self.drafts)
         if any(type(n) is not int or n < 1 for n in values):
             raise ConfigurationError("Optimization budgets must be positive integers")
@@ -60,8 +61,11 @@ class RunConfig:
     evaluation: EvaluationSpec = field(default_factory=EvaluationSpec)
     optimization: OptimizationSpec = field(default_factory=OptimizationSpec)
     msa_mode: str = "provided"
+    synthesis: SynthesisPolicy = field(default_factory=SynthesisPolicy)
 
     def __post_init__(self):
+        if self.optimization.strategy != "syncraft" and self.synthesis != SynthesisPolicy():
+            raise ConfigurationError("Custom synthesis settings require the syncraft strategy")
         if self.msa_mode not in {"provided", "single_sequence"}:
             raise ConfigurationError("run.msa_mode must be provided or single_sequence")
         if self.msa_mode == "single_sequence" and any(p.msa_path for p in self.complex.proteins):
@@ -81,7 +85,7 @@ def load_config(path):
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ConfigurationError("Configuration must be a YAML mapping")
-    allowed = {"proteins", "ligand", "pocket", "model_paths", "objective", "proposal", "run",
+    allowed = {"proteins", "ligand", "pocket", "model_paths", "objective", "proposal", "run", "synthesis",
                "evaluation", "optimization"}
     if set(data) - allowed:
         raise ConfigurationError(f"Unknown configuration sections: {sorted(set(data) - allowed)}")
@@ -112,8 +116,9 @@ def load_config(path):
         if evaluation.require_affinity_nonworsening and objective.affinity_weight == 0:
             raise ConfigurationError("The affinity acceptance guard requires an active affinity loss")
         optimization = OptimizationSpec(**data.get("optimization", {}))
+        synthesis = SynthesisPolicy(**data.get("synthesis", {}))
         result = RunConfig(spec, objective, policy, evaluation=evaluation,
-                           optimization=optimization, **run)
+                           optimization=optimization, synthesis=synthesis, **run)
         objective.validate(result.gradient_mode)
         if (type(result.sampling_steps) is not int or result.sampling_steps < 1
                 or type(result.trunk_passes) is not int or result.trunk_passes < 1

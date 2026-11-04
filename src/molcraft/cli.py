@@ -70,8 +70,18 @@ def _propose(args):
                                            config.sampling_steps, config.trunk_passes)
         evidence = value_and_grad(prepared, config.objective, config.gradient_mode,
                                   noise_seed=config.seed, backend=backend)
-        packet = build_proposals(prepared.graph, evidence, config.policy)
         output = Path(args.output)
+        if config.optimization.strategy == "syncraft":
+            from molcraft.agent.argmax import create_agent
+            from molcraft.optimization import _input_identity, _digest
+
+            agent, _ = create_agent("syncraft", synthesis_policy=config.synthesis)
+            key, _ = _input_identity(config)
+            packet = agent.propose(prepared.graph, evidence, config.policy,
+                samples=config.optimization.drafts, round_index=1,
+                context_id=_digest((key, prepared.graph.fingerprint)), journal_dir=output/"requests")
+        else:
+            packet = build_proposals(prepared.graph, evidence, config.policy)
         save_packet(packet, output / "proposals.json")
         save_json(evidence.to_dict(), output / "gradient_evidence.json")
         np.savez_compressed(output / "gradients.npz", atoms=evidence.atom_grad,
@@ -111,7 +121,16 @@ def _evaluate_set(args):
     config = load_config(args.config)
     packet = load_packet(args.packet)
     with prepare_complex(config.complex) as prepared:
-        result = evaluate_packet(prepared, packet, config, export_dir=Path(args.output))
+        kwargs = {}
+        if config.optimization.strategy == "syncraft":
+            from molcraft.agent.syncraft import SynCraftAgent
+            from molcraft.optimization import _input_identity, _digest
+
+            key, _ = _input_identity(config)
+            kwargs = {"selected_ids": SynCraftAgent(None, policy=config.synthesis).select(
+                        packet, config.evaluation.candidate_budget),
+                      "context_id": _digest((key, prepared.graph.fingerprint))}
+        result = evaluate_packet(prepared, packet, config, export_dir=Path(args.output), **kwargs)
         save_json(result, Path(args.output) / "evaluation.json")
         save_json(result["selected_graph"], Path(args.output) / "next_graph.json")
         print(json.dumps({"status": result["status"], "selected_id": result["selected_id"],
@@ -122,7 +141,7 @@ def _prepare_example(args):
     from molcraft.io.examples import prepare_example
 
     result = prepare_example(args.case, args.output, args.model_dir, msa_source=args.msa,
-                             work_root=args.work_root, msa_mode=args.msa_mode)
+                             work_root=args.work_root, msa_mode=args.msa_mode, strategy=args.strategy)
     print(json.dumps(result, indent=2))
 
 
@@ -172,7 +191,7 @@ def _optimize(args):
     devices = jax.devices()
     if not devices or devices[0].platform != "gpu":
         raise ConfigurationError("The optimization CLI requires an actual GPU/DCU device")
-    agent, provider_metadata = create_agent(config.optimization.strategy)
+    agent, provider_metadata = create_agent(config.optimization.strategy, synthesis_policy=config.synthesis)
     import subprocess
     git = subprocess.run(["git", "-C", str(Path(args.work_root).resolve()), "rev-parse", "HEAD"],
                          capture_output=True, text=True, check=False)
@@ -219,6 +238,7 @@ def main(argv=None):
     example.add_argument("--case", default="vdr-3a2i", choices=("vdr-3a2i", "gba-2v3d"))
     example.add_argument("--msa")
     example.add_argument("--msa-mode", choices=("provided", "single_sequence"), default="provided")
+    example.add_argument("--strategy", choices=("syncraft", "optagent", "argmax"), default="syncraft")
     example.add_argument("--output", required=True)
     example.add_argument("--model-dir", required=True)
     example.add_argument("--work-root", default=".")
