@@ -77,16 +77,22 @@ def _propose(args):
 
             agent, _ = create_agent("syncraft", synthesis_policy=config.synthesis)
             key, _ = _input_identity(config)
+            from molcraft.agent.history import DraftHistory
+
+            history = DraftHistory(output, key)
             packet = agent.propose(prepared.graph, evidence, config.policy,
                 samples=config.optimization.drafts, round_index=1,
-                context_id=_digest((key, prepared.graph.fingerprint)), journal_dir=output/"requests")
+                context_id=_digest((key, prepared.graph.fingerprint)), journal_dir=output/"requests",
+                candidate_budget=config.evaluation.candidate_budget, history=history.before(1))
+            history.record_round(1, prepared.graph, packet, requests=output/"requests")
         else:
             packet = build_proposals(prepared.graph, evidence, config.policy)
         save_packet(packet, output / "proposals.json")
         save_json(evidence.to_dict(), output / "gradient_evidence.json")
         np.savez_compressed(output / "gradients.npz", atoms=evidence.atom_grad,
                             bonds=evidence.bond_grad, charges=evidence.charge_grad)
-        print(json.dumps({"status": packet.status, "packet": str(output / "proposals.json")}, indent=2))
+        print(json.dumps({"status": packet.status, "packet": str(output / "proposals.json"),
+                          **({"pool": packet.diagnostics["pool"]} if "pool" in packet.diagnostics else {})}, indent=2))
 
 
 def _evaluate(args):
@@ -131,6 +137,12 @@ def _evaluate_set(args):
                         packet, config.evaluation.candidate_budget),
                       "context_id": _digest((key, prepared.graph.fingerprint))}
         result = evaluate_packet(prepared, packet, config, export_dir=Path(args.output), **kwargs)
+        if config.optimization.strategy == "syncraft":
+            from molcraft.agent.history import DraftHistory
+
+            proposal_root = Path(args.packet).parent
+            DraftHistory(proposal_root, key).record_round(1, prepared.graph, packet, result,
+                                                        requests=proposal_root/"requests")
         save_json(result, Path(args.output) / "evaluation.json")
         save_json(result["selected_graph"], Path(args.output) / "next_graph.json")
         print(json.dumps({"status": result["status"], "selected_id": result["selected_id"],

@@ -5,8 +5,9 @@ Frozen Boltz-2 input gradients -> chemically constrained discrete ligand edits.
 MolCraft uses atom, undirected-bond and formal-charge derivatives to construct edit
 preferences. The current molecule remains discrete and valid. No DeFoG repair or
 continuous graph optimization is used. New example inputs use a SynCraft-guided
-LLM proposal mode with complete functional-group plans, synthesis-proxy checks,
-and deterministic candidate selection. Legacy OptAgent and no-LLM argmax remain
+LLM proposal mode with functional-group preferences, synthesis-proxy checks,
+adaptive candidate pools and measured draft feedback. Selection is deterministic;
+coverage acceptance preserves an attained pocket-coverage threshold. Legacy OptAgent and no-LLM argmax remain
 available for reproducing earlier trajectories.
 
 ## Design and algorithms

@@ -2,7 +2,7 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from importlib.resources import files
-import json
+import math
 
 import numpy as np
 
@@ -13,21 +13,25 @@ from molcraft.errors import ChemistryError, ConfigurationError
 from molcraft.guidance.probability import masked_softmax
 from molcraft.guidance.proposals import EditCandidate, ProposalPacket, direction_tables
 from .deepseek import ProviderError, RequestJournal
-from .optagent import SynCraftCases, _directions, compile_draft
+from .optagent import SynCraftCases, compile_draft
+from .context import build_proposal_messages, operation_key
+from .history import request_records
 
 
 UPSTREAM_COMMIT = "557703e110b26a354afed2955ded5217837f6692"
 
 
-def compile_synthesis_draft(graph, evidence, content, region, frozen, case_ids, focus, policy):
+def compile_synthesis_draft(graph, evidence, content, region, frozen, case_ids, focus, policy, *, excluded=()):
     if not isinstance(content, dict) or set(content) != {"operations", "rationale", "case_ids", "synthesis"}:
         raise ChemistryError("SynCraft draft requires operations, rationale, case_ids and synthesis")
     base = {k: content[k] for k in ("operations", "rationale", "case_ids")}
     ops, updated, score, reason = compile_draft(graph, evidence, base, region, frozen, case_ids)
+    if updated.smiles in excluded:
+        raise ChemistryError("Candidate chemistry has already been proposed at this source")
     touched = {i for op in ops for i in op.atom_ids}
-    check_plan(content["synthesis"], graph, updated, touched, set(focus))
+    catalogue = check_plan(content["synthesis"], graph, updated, touched, set(focus))
     assessment = assess_synthesis(graph, updated, policy)
-    reason.update(synthesis_plan=content["synthesis"], synthesis_assessment=assessment)
+    reason.update(synthesis_plan=content["synthesis"], synthesis_assessment={**assessment, **catalogue})
     return ops, updated, score, reason
 
 
@@ -41,7 +45,11 @@ class SynCraftAgent:
         sa_score("CC")
 
     def propose(self, graph, evidence, policy, *, samples, round_index, context_id,
-                journal_dir=None, excluded=()):
+                journal_dir=None, excluded=(), candidate_budget=None, history=()):
+        if type(samples) is not int or samples < 1:
+            raise ConfigurationError("Draft budget must be a positive integer")
+        if candidate_budget is not None and (type(candidate_budget) is not int or candidate_budget < 1):
+            raise ConfigurationError("Candidate budget must be a positive integer")
         tables, raw, _ = direction_tables(graph, evidence, policy)
         frozen = set(policy.frozen_atom_ids)
         regions = complete_regions(graph, frozen, self.policy.region_atoms)
@@ -60,75 +68,99 @@ class SynCraftAgent:
                             preferences[i] = max(preferences[i], q)
         anchors = sorted(regions, key=lambda i: (strengths[i], -preferences[i], i))[:self.policy.focus_atoms]
         # Only focused anchors rotate; entire groups may add supporting atoms.
-        cases = self.knowledge.retrieve(graph)
+        cases = self.knowledge.retrieve(graph)[:2]
         case_ids = {c["id"] for c in cases}
         source_sa = sa_score(graph.smiles)
-        journal = RequestJournal(journal_dir)
+        journal = RequestJournal(journal_dir, bind_messages=True)
+        records = list(history)
+        known_keys = {operation_key(r.get("operations", [])) for r in records
+                      if r.get("source_fingerprint") == graph.fingerprint}
+        known_keys.discard(None)
+        excluded = set(excluded) | {r["smiles"] for r in records if "smiles" in r
+                                   and r.get("source_fingerprint") == graph.fingerprint}
+        target = max(samples, math.ceil(candidate_budget * self.policy.pool_multiplier)) if candidate_budget else samples
+        limit = self.policy.max_drafts if candidate_budget else samples
 
-        def draft(index):
+        def draft(index, feedback, avoided_keys, avoided_smiles):
             anchor = anchors[(index + round_index - 1) % len(anchors)]
             region, units = regions[anchor]
-            context = {"sample": index+1, "mapped_smiles": graph.mapped_smiles,
-                "anchor": anchor, "focus_atom_ids": anchors, "editable_atom_ids": sorted(region-frozen),
-                "complete_source_groups": units, "product_motif_catalog": motif_catalog(),
-                "gradient_directions": _directions(tables, region), "cases": cases,
-                "source_sa_score": source_sa,
-                "synthesis_limits": {"max_sa_score": self.policy.max_sa_score,
-                                     "max_sa_increase": self.policy.max_sa_increase},
-                "prior_chemistries_to_avoid": sorted(excluded)[:32],
-                "closest_pocket_distance_angstrom": dict(zip(graph.atom_ids, evidence.pocket_distances)),
-                "interaction_evidence": "nearest_distances_only_no_PLIP_or_residue_identity"}
-            messages = [{"role": "system", "content": self.guidance + "\n" +
-                "Output JSON only with keys operations, rationale, case_ids, synthesis. "
-                "Use 1-8 atom/bond/charge operations, at most 6 touched atoms in editable_atom_ids, "
-                "and touch at least one focus_atom_id. No atom addition/deletion. Each operation "
-                "has kind, atom_ids, value. Bond values SINGLE/DOUBLE/TRIPLE/AROMATIC/NO_EDGE; "
-                "charge values -1/0/1. Gradient directions are [category,loss_change,preference,single_valid]; "
-                "a single-invalid edit can be valid in a joint group transformation. "
-                "synthesis must contain liability, transformation, target_motifs, replaced_source_groups, "
-                "feasibility_basis. Each target_motifs entry has motif and complete atom_ids matching "
-                "the catalog; their union covers every touched atom. List the IDs of all destroyed "
-                "source functional groups/rings in replaced_source_groups; use [] if none. Cover "
-                "all atoms of each replaced group with the declared product motifs. Each explanation "
-                "is <=600 characters; rationale <=500. case_ids contains only supplied references."},
-                {"role": "user", "content": json.dumps(context, separators=(",", ":"))}]
+            messages = build_proposal_messages(self.guidance, graph, evidence, tables,
+                sample=index+1, anchor=anchor, focus=anchors, region=region, frozen=frozen,
+                units=units, catalog=motif_catalog(), cases=cases, source_sa=source_sa,
+                policy=self.policy, records=feedback, excluded=avoided_smiles)
+            notes = []
 
             def check(content):
-                result = compile_synthesis_draft(graph, evidence, content, region, frozen,
-                                                  case_ids, anchors, self.policy)
-                if result[1].smiles in excluded:
-                    raise ChemistryError("Candidate chemistry has already been evaluated at this source")
+                note = {"round": round_index, "source_fingerprint": graph.fingerprint,
+                        "operations": content.get("operations", []) if isinstance(content, dict) else [],
+                        "status": "invalid"}
+                notes.append(note)
+                key = operation_key(note["operations"])
+                if key and key in avoided_keys:
+                    note["error"] = "This exact operation combination was already attempted at this source"
+                    raise ChemistryError(note["error"])
+                try:
+                    result = compile_synthesis_draft(graph, evidence, content, region, frozen,
+                        case_ids, anchors, self.policy, excluded=avoided_smiles)
+                except (ChemistryError, ValueError, TypeError, KeyError) as exc:
+                    note["error"] = str(exc)[:180]
+                    raise
+                note.update(status="ok", smiles=result[1].smiles, predicted_change=result[2])
                 return result
 
-            return journal.request(f"draft-{index:02d}", self.client, messages, check)
+            slot = f"draft-{index:02d}"
+            try:
+                result = journal.request(slot, self.client, messages, check)
+                error = None
+            except ProviderError as exc:
+                result, error = None, exc
+            # Reading the same receipts on the first run and replay keeps adaptive
+            # batch feedback identical, including rejected first attempts.
+            feedback_rows = (request_records(journal_dir, graph.fingerprint, round_index, slot)
+                             if journal_dir is not None else notes)
+            return result, error, feedback_rows
 
-        proposals, errors = [], []
+        proposals, errors, attempted = [], [], 0
+        seen = {graph.smiles}
         if anchors:
             with ThreadPoolExecutor(max_workers=2) as pool:
-                futures = [pool.submit(draft, i) for i in range(samples)]
-                for future in futures:
-                    try:
-                        result = future.result()
-                        if result is not None:
+                while attempted < limit and len(proposals) < target:
+                    count = min(self.policy.draft_batch_size, limit-attempted, target-len(proposals))
+                    futures = [pool.submit(draft, i, list(records), set(known_keys), set(excluded))
+                               for i in range(attempted, attempted+count)]
+                    attempted += count
+                    for future in futures:
+                        result, error, feedback = future.result()
+                        records.extend(feedback)
+                        known_keys.update(key for row in feedback
+                                          if (key := operation_key(row.get("operations", []))))
+                        if error:
+                            errors.append(error)
+                        if result is not None and result[1].smiles not in seen:
                             proposals.append(result)
-                    except ProviderError as exc:
-                        errors.append(exc)
+                            seen.add(result[1].smiles)
+                            excluded.add(result[1].smiles)
+                            records.append({"round": round_index, "source_fingerprint": graph.fingerprint,
+                                "operations": [op.to_dict() for op in result[0]], "smiles": result[1].smiles,
+                                "predicted_change": result[2], "outcome": "awaiting_Boltz_metrics"})
+                    if any(not e.retryable and not e.exhausted for e in errors):
+                        break
         if errors and (not proposals or any(not e.retryable and not e.exhausted for e in errors)):
             raise next((e for e in errors if not e.exhausted), errors[0])
         candidates = [EditCandidate("noop", graph.fingerprint, (), graph, 0.0)]
         reasons, selection_scores = {}, {"noop": 0.0}
-        seen = {graph.smiles}
         def priority(item):
-            return item[2] + self.policy.sa_weight * item[3]["synthesis_assessment"]["sa_change"]
+            assessment = item[3]["synthesis_assessment"]
+            return (not assessment["catalog_preferred"], item[2] + self.policy.sa_weight * assessment["sa_change"])
         for ops, updated, score, reason in sorted(proposals, key=lambda p: (priority(p), p[1].fingerprint)):
-            if updated.smiles in seen:
-                continue
-            seen.add(updated.smiles)
             cid = f"synthesis-{len(candidates):02d}"
             candidates.append(EditCandidate(cid, graph.fingerprint, ops, updated, score))
             reasons[cid] = reason
             selection_scores[cid] = score + self.policy.sa_weight * reason["synthesis_assessment"]["sa_change"]
-        preferences = masked_softmax(np.array([[selection_scores[c.candidate_id] for c in candidates]]),
+        # Ordinal preferences encode the catalogue-first order; raw gradient/SA
+        # scores remain separate and are never relabelled as measured affinity.
+        rank_scores = [len(candidates)-1, *range(len(candidates)-1)]
+        preferences = masked_softmax(np.array([rank_scores], dtype=float),
                                     np.ones((1,len(candidates)), dtype=bool), policy.temperature)[0]
         for candidate, preference in zip(candidates, preferences):
             candidate.probability = float(preference)
@@ -140,8 +172,12 @@ class SynCraftAgent:
              "selection_scores": selection_scores,
              "selection_score_formula": "predicted_change + sa_weight * sa_change",
              "sa_weight": self.policy.sa_weight, "provider_failures": len(errors),
-             "attempted_samples": samples if anchors else 0,
-             "selection": "deterministic_synthesis_adjusted_top_k",
+             "attempted_samples": attempted,
+             "pool": {"target": target, "unique_valid": len(proposals), "max_drafts": limit,
+                      "shortfall": max(0, target-len(proposals)),
+                      "stop_reason": "no_regions" if not anchors else "target_reached" if len(proposals)>=target else "draft_budget_exhausted"},
+             "probability_semantics": "ordinal_catalogue_then_synthesis_score_not_binding_probability",
+             "selection": "catalogue_first_then_other_legal_candidates",
              "retrosynthesis": "not_run", "vina_plip": "not_run"})
 
     def select(self, packet, budget, *, journal_dir=None):
@@ -150,5 +186,7 @@ class SynCraftAgent:
         if packet.diagnostics.get("protocol") != self.policy.protocol_version:
             raise ConfigurationError("Selection requires a synthesis-screened packet")
         scores = packet.diagnostics["selection_scores"]
+        reasons = packet.diagnostics["agent_explanations"]
         return [c.candidate_id for c in sorted((c for c in packet.candidates if c.operations),
-                key=lambda c: (scores[c.candidate_id], c.predicted_change, c.candidate_id))[:budget]]
+                key=lambda c: (not reasons[c.candidate_id]["synthesis_assessment"]["catalog_preferred"],
+                               scores[c.candidate_id], c.predicted_change, c.candidate_id))[:budget]]

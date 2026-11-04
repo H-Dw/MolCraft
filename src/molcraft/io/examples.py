@@ -163,6 +163,10 @@ def prepare_example(case_id, output, model_dir, *, msa_source=None, work_root=".
                              "max_rounds": 25 if formal else 1, "min_rounds": 10 if formal else 1,
                              "patience": 5 if formal else 1, "drafts": 10 if formal else 2},
         }
+        if strategy == "syncraft":
+            config["evaluation"].update(coverage_mode="preserve", min_coverage=0.5)
+            config["synthesis"] = {"protocol_version": "syncraft-group-v2",
+                                   "pool_multiplier": 2.0, "max_drafts": 32, "draft_batch_size": 2}
         task_path(work_root, output / f"{profile}.yaml").write_text(
             yaml.safe_dump(config, sort_keys=False), encoding="utf-8", newline="\n")
     return metadata

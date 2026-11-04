@@ -108,6 +108,8 @@ def test_legacy_identity_is_preserved_and_new_modes_are_distinct():
     data["complex"].pop("cache_dir")
     data.pop("msa_mode")
     data["optimization"].pop("strategy")
+    data["evaluation"].pop("coverage_mode")
+    data["evaluation"].pop("min_coverage")
     expected = _digest({"version": 1, "config": data, "inputs": {}})
     assert _input_identity(legacy)[0] == expected
     assert _input_identity(replace(legacy, msa_mode="single_sequence"))[0] != expected

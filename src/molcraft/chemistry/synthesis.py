@@ -12,7 +12,7 @@ from molcraft.errors import ChemistryError, ConfigurationError
 
 @dataclass(frozen=True)
 class SynthesisPolicy:
-    protocol_version: str = "syncraft-group-v1"
+    protocol_version: str = "syncraft-group-v2"
     focus_atoms: int = 8
     region_atoms: int = 12
     max_sa_score: float = 6.0
@@ -21,13 +21,18 @@ class SynthesisPolicy:
     check_conformer: bool = True
     conformer_seed: int = 0
     conformer_iterations: int = 200
+    pool_multiplier: float = 2.0
+    max_drafts: int = 32
+    draft_batch_size: int = 2
 
     def __post_init__(self):
-        if self.protocol_version != "syncraft-group-v1":
+        if self.protocol_version != "syncraft-group-v2":
             raise ConfigurationError("Unknown synthesis protocol")
-        for key in ("focus_atoms", "region_atoms", "conformer_iterations"):
+        for key in ("focus_atoms", "region_atoms", "conformer_iterations", "max_drafts", "draft_batch_size"):
             if type(getattr(self, key)) is not int or getattr(self, key) < 1:
                 raise ConfigurationError(f"synthesis.{key} must be a positive integer")
+        if not math.isfinite(self.pool_multiplier) or self.pool_multiplier <= 1:
+            raise ConfigurationError("synthesis.pool_multiplier must exceed one")
         if (not math.isfinite(self.max_sa_score) or not 1 <= self.max_sa_score <= 10
                 or not math.isfinite(self.max_sa_increase) or self.max_sa_increase < 0
                 or not math.isfinite(self.sa_weight) or self.sa_weight < 0):
@@ -59,6 +64,8 @@ MOTIFS = {
     "thioether": ("[C,c][S;X2][C,c]", "sulfide building blocks / C-S bond formation"),
     "alkene": ("[C;X3]=[C;X3]", "alkene building blocks; preserve specified E/Z geometry"),
     "alkyl_segment": ("[C;X4][C;X4][C;X4]", "simple alkyl building blocks"),
+    "alkyl_halide": ("[C;X4][F,Cl,Br,I]", "alkyl-halide building blocks"),
+    "aryl_halide": ("[c][F,Cl,Br,I]", "aryl-halide building blocks / cross-coupling precursors"),
 }
 RING_MOTIFS = {
     "aromatic_ring": "aromatic building blocks / appropriately substituted heteroarenes",
@@ -193,37 +200,49 @@ def check_plan(plan, source, product, touched, focus):
     if not touched.intersection(focus):
         raise ChemistryError("The edit must touch a high-preference focus atom")
     motifs = plan["target_motifs"]
-    if not isinstance(motifs, list) or not 1 <= len(motifs) <= 4:
-        raise ChemistryError("Declare one to four complete product motifs")
-    matched = {(g["motif"], tuple(g["atom_ids"])) for g in groups(product)}
-    covered, seen = set(), set()
+    if not isinstance(motifs, list) or len(motifs) > 4:
+        raise ChemistryError("Declare zero to four product motifs; use [] for an uncatalogued transformation")
+    product_groups = groups(product)
+    matched = {(g["motif"], tuple(g["atom_ids"])) for g in product_groups}
+    covered, seen, warnings, matched_motifs = set(), set(), [], []
     for motif in motifs:
         if not isinstance(motif, dict) or set(motif) != {"motif", "atom_ids"}:
             raise ChemistryError("Product motifs require motif and atom_ids")
         name, ids = motif["motif"], motif["atom_ids"]
-        if (not isinstance(name, str) or name not in set(MOTIFS) | set(RING_MOTIFS)
+        if (not isinstance(name, str) or not name.strip()
                 or not isinstance(ids, list) or not ids or any(type(i) is not int for i in ids)
-                or len(ids) != len(set(ids))):
-            raise ChemistryError("Unknown or malformed product motif")
+                or len(ids) != len(set(ids)) or not set(ids) <= set(product.atom_ids)):
+            raise ChemistryError("Malformed product motif or unknown atom ID")
         key = name, tuple(sorted(ids))
         if key not in matched or key in seen:
-            raise ChemistryError("Claimed complete product motif does not match the executed graph")
+            warnings.append(f"Unmatched or duplicate motif claim: {name}:{','.join(map(str, ids))}")
+            continue
         seen.add(key)
         covered.update(ids)
+        matched_motifs.append({"motif": name, "atom_ids": sorted(ids)})
     if not touched <= covered:
-        raise ChemistryError("All edited atoms must belong to declared complete product motifs")
+        warnings.append("Catalogue motifs do not cover every edited atom")
     product_ids = {g["id"] for g in groups(product)}
     destroyed = [g for g in groups(source) if (g["motif"] in _PROTECTED or
                  g["motif"].startswith("integrity_ring_")) and set(g["atom_ids"]) & touched
                  and g["id"] not in product_ids]
     declared = plan["replaced_source_groups"]
     if (not isinstance(declared, list) or any(not isinstance(x, str) for x in declared)
-            or len(set(declared)) != len(declared) or set(declared) != {g["id"] for g in destroyed}):
-        expected = ", ".join(g["id"] for g in destroyed)
-        raise ChemistryError("Declare every replaced source group/ring by its complete group ID; "
-                             f"expected [{expected}]")
+            or len(set(declared)) != len(declared)):
+        raise ChemistryError("Malformed replaced_source_groups")
+    if set(declared) != {g["id"] for g in destroyed}:
+        warnings.append("Replaced source group declarations differ from actual groups")
     if any(not set(g["atom_ids"]) <= covered for g in destroyed):
-        raise ChemistryError("A replaced source group must be covered as a whole by product motifs")
+        warnings.append("Catalogue motifs do not cover a replaced source group as a whole")
+    recognized = [g for g in product_groups if g["motif"] in set(MOTIFS) | set(RING_MOTIFS)]
+    actual_covered = {i for g in recognized for i in g["atom_ids"]}
+    # Rank the executed chemistry, not the LLM's ability to name a known motif.
+    preferred = touched <= actual_covered and all(set(g["atom_ids"]) <= actual_covered for g in destroyed)
+    return {"catalog_preferred": preferred,
+            "matched_motifs": matched_motifs, "catalog_warnings": warnings,
+            "recognized_product_motifs": recognized,
+            "actual_replaced_source_groups": [g["id"] for g in destroyed],
+            "catalogue_is_acceptance_gate": False}
 
 
 def assess_synthesis(source, product, policy):

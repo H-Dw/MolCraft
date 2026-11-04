@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
+import math
 import yaml
 
 from molcraft.errors import ConfigurationError
@@ -19,6 +20,8 @@ class EvaluationSpec:
     sampling_steps: int | None = None
     trunk_passes: int | None = None
     require_affinity_nonworsening: bool = False
+    coverage_mode: str = "off"
+    min_coverage: float = 0.5
 
     def __post_init__(self):
         for name in ("candidate_budget", "sampling_steps", "trunk_passes"):
@@ -29,6 +32,11 @@ class EvaluationSpec:
                 raise ConfigurationError(f"evaluation.{name} must be a positive integer")
         if type(self.require_affinity_nonworsening) is not bool:
             raise ConfigurationError("evaluation.require_affinity_nonworsening must be boolean")
+        if self.coverage_mode not in {"off", "preserve", "strict"}:
+            raise ConfigurationError("evaluation.coverage_mode must be off, preserve or strict")
+        if (isinstance(self.min_coverage, bool) or not math.isfinite(self.min_coverage)
+                or not 0 <= self.min_coverage < 1):
+            raise ConfigurationError("evaluation.min_coverage must be in [0, 1)")
 
 
 @dataclass(frozen=True)
@@ -112,7 +120,10 @@ def load_config(path):
         if "frozen_atom_ids" in policy_data:
             policy_data["frozen_atom_ids"] = tuple(policy_data["frozen_atom_ids"])
         policy = ProposalPolicy(**policy_data)
-        evaluation = EvaluationSpec(**data.get("evaluation", {}))
+        evaluation_data = data.get("evaluation", {}).copy()
+        if data.get("optimization", {}).get("strategy") == "syncraft":
+            evaluation_data.setdefault("coverage_mode", "preserve")
+        evaluation = EvaluationSpec(**evaluation_data)
         if evaluation.require_affinity_nonworsening and objective.affinity_weight == 0:
             raise ConfigurationError("The affinity acceptance guard requires an active affinity loss")
         optimization = OptimizationSpec(**data.get("optimization", {}))

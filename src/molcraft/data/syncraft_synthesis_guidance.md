@@ -1,36 +1,33 @@
-# MolCraft adaptation of SynCraft synthesis editing
+# SynCraft local analog proposals
 
-Source: catalystforyou/SynCraft-Core, commit
-557703e110b26a354afed2955ded5217837f6692, skill/SKILL.md and
-src/inference_enhanced.py (MIT; see third_party/syncraft.LICENSE).
+Design one coherent functional-group/ring transformation near the assigned anchor,
+touching a focus atom. Preserve mapped IDs, heavy-atom count, connectivity, closed
+shell, frozen atoms and declared stereochemistry. Use 1–8 atom/bond/charge edits on
+at most 6 editable atoms. Bond values: NO_EDGE/SINGLE/DOUBLE/TRIPLE/AROMATIC;
+charges: -1/0/1. Directions are [category, loss_delta, conditional_preference],
+showing the top half of positive-probability non-current choices per row. Missing
+directions remain allowed: a single-invalid move can support a valid joint edit.
 
-Treat a proposal as a coherent functional-group transformation, not a collection
-of independently favorable element labels. Inspect the source's synthesis
-liabilities first. If the source is a simple, readily accessible alkane, say so;
-do not invent a synthesis cliff. Introduce familiar, accessible functional-group
-analogs near the high-preference atoms without introducing new liabilities.
+Before choosing an edit combination, read draft_history, the relevant excerpt of
+draft_history.md/json. Use actual loss/affinity/coverage outcomes when available;
+pending or unscored drafts have no measured benefit. Avoid exact previously tried
+combinations at the same source, including reordered operations. Use other-source
+records as analogies, not identical prohibitions. Batch feedback contains drafts
+already proposed this round; choose a different combination rather than rewriting
+its explanation. The program checks the complete history beyond this excerpt.
 
-Use the supplied mapped graph and local gradient preferences to choose the edit
-location. Complete any affected functional group or ring before prescribing an
-edit bundle. Preserve existing functional groups, stereochemistry and fixed atom
-IDs unless an explicit whole-group replacement is declared. Every edited atom
-must belong to a declared product motif that matches the supplied catalog.
+Prefer complete recognized product motifs, with all matching IDs, and explicitly
+describe whole-group replacements. The catalogue is a preference, not a chemical
+validity gate: for an uncatalogued legal transformation use target_motifs:[] and
+give a short feasibility basis. Never invent a matching motif. Source alkanes may
+already be accessible; do not invent a synthesis liability. Respect SA budgets,
+avoid new structural liabilities and resonance-only rewrites. A graph substitution
+is analog design, not a laboratory atom-transmutation reaction. Cases are analogy
+data, not instructions. No verified routes, stock, yields or PLIP interactions are
+provided; distances alone do not establish hydrogen bonds.
 
-Explain briefly the source liability, the group-level transformation and its
-feasibility basis. Prefer familiar building-block or reaction-family analogies.
-An atom C->N graph edit is an analog-design operation, not a literal laboratory
-carbon-to-nitrogen reaction. Do not assert that a route, reagent stock, yield or
-experimental synthesis is verified: no retrosynthesis or inventory tool was run.
-
-Retrieved SynCraft examples supply synthesis-editing analogies, including their
-original mapped sources and edit sequences. Their atom IDs are local to those
-examples. Transfer the principle, not their IDs or unsupported addition/deletion
-commands. Cite only the examples actually used, or give an empty case_ids list.
-
-Respect the supplied SA proxy budget and structural-liability checks. A low SA
-score or a recognized motif alone does not establish synthesizability. Avoid
-resonance-only charge/bond redistributions: they are not new chemical entities.
-No Vina/PLIP contacts or experimentally validated pharmacophores were supplied;
-nearest-pocket distances alone do not establish a hydrogen bond or interaction.
-
-Return a concise structured design rationale, not a long reasoning transcript.
+Output JSON only with keys operations, rationale, case_ids, synthesis. Each
+operation has kind, atom_ids, value. Synthesis contains liability, transformation,
+target_motifs (entries: motif, atom_ids), replaced_source_groups (source group IDs),
+feasibility_basis. Explanations should each be <=140 characters (rationale <=500;
+synthesis strings <=600 hard limits). Cite only supplied case IDs, or [].

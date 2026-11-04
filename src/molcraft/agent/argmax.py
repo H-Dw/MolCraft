@@ -44,5 +44,5 @@ def create_agent(strategy, *, synthesis_policy=None):
                        "agent_protocol": agent.policy.protocol_version,
                        "syncraft_source_commit": UPSTREAM_COMMIT,
                        "synthesis_evidence": "motif_and_proxy_checked_not_retrosynthesis",
-                       "selection": "deterministic_synthesis_adjusted_top_k"}
+                       "selection": "catalogue_first_then_other_legal_candidates"}
     return OptAgent(client), {"api_models_http": 200, "model": client.model}

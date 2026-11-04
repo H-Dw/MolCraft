@@ -38,8 +38,10 @@ def _input_identity(config):
     if config.optimization.strategy == "syncraft":
         from importlib.resources import files
 
-        for name in ("syncraft_synthesis_guidance.md", "syncraft_reasoning.json"):
-            resource = files("molcraft").joinpath("data", name)
+        for name in ("data/syncraft_synthesis_guidance.md", "data/syncraft_reasoning.json",
+                     "agent/syncraft.py", "agent/context.py", "agent/history.py", "agent/deepseek.py",
+                     "chemistry/synthesis.py"):
+            resource = files("molcraft").joinpath(*name.split("/"))
             inputs[name] = hashlib.sha256(resource.read_bytes()).hexdigest()
     if spec.model_paths:
         paths = spec.model_paths
@@ -51,6 +53,9 @@ def _input_identity(config):
     # A new, versioned protocol; old OptAgent/argmax identities remain intact.
     if config.optimization.strategy != "syncraft":
         cfg.pop("synthesis")
+        if config.evaluation.coverage_mode == "off" and config.evaluation.min_coverage == 0.5:
+            cfg["evaluation"].pop("coverage_mode")
+            cfg["evaluation"].pop("min_coverage")
     # Preserve the identity of published, default OptAgent checkpoints.
     if cfg["optimization"]["strategy"] == "optagent":
         cfg["optimization"].pop("strategy")
@@ -117,6 +122,11 @@ def _run(config, agent, output, resume, stop_after, backend, evaluation_backend,
                  "budget": asdict(config.optimization), "external_metrics": {
                      "af3": "not_evaluated", "vina": "not_evaluated"}}
         save_json(state, path)
+    draft_history = None
+    if config.optimization.strategy == "syncraft":
+        from molcraft.agent.history import DraftHistory
+
+        draft_history = DraftHistory(output, key)
     if backend is None:
         event({"phase": "weights"})
         backend = Boltz2Backend.from_paths(config.complex.model_paths, config.sampling_steps,
@@ -142,6 +152,7 @@ def _run(config, agent, output, resume, stop_after, backend, evaluation_backend,
         context = _digest((key, source))
         spec = replace(config.complex, ligand_smiles=graph.mapped_smiles)
         started = time.monotonic()
+        source_graph, packet, result = graph, None, None
         state.pop("error", None)
         try:
             event({"phase": "prepare", "round": index, "smiles": graph.smiles})
@@ -170,10 +181,14 @@ def _run(config, agent, output, resume, stop_after, backend, evaluation_backend,
                 excluded = {smiles for row in state["rounds"] if row.get("source") == source
                             for smiles in row.get("attempted_smiles", row.get("evaluated_smiles", []))}
                 event({"phase": "propose", "round": index})
+                proposal_context = ({"candidate_budget": config.evaluation.candidate_budget,
+                                     "history": draft_history.before(index)} if draft_history else {})
                 packet = agent.propose(graph, evidence, config.policy,
                     samples=config.optimization.drafts, round_index=index, context_id=context,
-                    journal_dir=requests, excluded=excluded)
+                    journal_dir=requests, excluded=excluded, **proposal_context)
                 save_packet(packet, round_dir / "proposals.json")
+                if draft_history:
+                    draft_history.record_round(index, source_graph, packet, requests=requests)
                 selected = agent.select(packet, config.evaluation.candidate_budget,
                                         journal_dir=requests)
                 event({"phase": "rescore", "round": index, "selected_ids": selected})
@@ -182,7 +197,17 @@ def _run(config, agent, output, resume, stop_after, backend, evaluation_backend,
                                selected_ids=selected, context_id=context, export_dir=round_dir)
             graph = MolecularGraph.from_dict(result["selected_graph"])
             save_json(result, round_dir / "evaluation.json")
+            if draft_history:
+                draft_history.record_round(index, source_graph, packet, result, requests=requests)
+                successful = result.get("best_successful")
+                if successful and (not state.get("best_successful")
+                                   or successful["loss"] < state["best_successful"]["loss"]):
+                    state["best_successful"] = {**successful, "round": index}
+                    save_json(state["best_successful"], output / "best_successful.json")
         except ProviderError as exc:
+            if draft_history:
+                draft_history.record_round(index, source_graph, packet, result,
+                                           requests=requests, error=str(exc))
             state.update(status="provider_interrupted", error=str(exc))
             if exc.exhausted:
                 state["rounds"].append({"round": index, "status": "provider_exhausted",
@@ -192,6 +217,11 @@ def _run(config, agent, output, resume, stop_after, backend, evaluation_backend,
             event({"phase": "provider_interrupted", "round": index, "error": str(exc)})
             return state
         except Exception as exc:
+            if draft_history:
+                progress = round_dir / "evaluation_progress.json"
+                partial = json.loads(progress.read_text(encoding="utf-8")) if progress.exists() else result
+                draft_history.record_round(index, source_graph, packet, partial,
+                                           requests=requests, error=f"{type(exc).__name__}: {exc}")
             state.update(status="evaluation_interrupted", error=f"{type(exc).__name__}: {exc}")
             save_json(state, path)
             raise
@@ -211,6 +241,8 @@ def _run(config, agent, output, resume, stop_after, backend, evaluation_backend,
                "evaluated_candidates": len(result["candidates"]),
                "legal_candidates": len(packet.candidates) - 1,
                "seconds": time.monotonic() - started}
+        if draft_history:
+            row["proposal_pool"] = packet.diagnostics["pool"]
         state["rounds"].append(row)
         state.update(graph=graph.to_dict(), next_round=index + 1, status="running")
         if index >= config.optimization.min_rounds and state["no_accept"] >= config.optimization.patience:

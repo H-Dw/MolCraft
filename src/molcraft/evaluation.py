@@ -16,6 +16,16 @@ from molcraft.io.serialization import save_json
 EVALUATION_PROTOCOL = "candidate-failure-isolation-v1"
 
 
+def evaluation_protocol(config):
+    return EVALUATION_PROTOCOL + ("+coverage-v1" if config.evaluation.coverage_mode != "off" else "")
+
+
+def _coverage(metrics):
+    if "bcov" not in metrics or not 0 <= metrics["bcov"] <= 1:
+        raise GradientError("Coverage acceptance requires a finite bcov in [0, 1]")
+    return metrics["bcov"]
+
+
 def _progress_identity(prepared, candidates, config, context_id, noise):
     # Optimization supplies a context including file hashes and an explicit Noise
     # replay. Generic callers without that contract do not reuse cached scores.
@@ -27,7 +37,7 @@ def _progress_identity(prepared, candidates, config, context_id, noise):
         array = np.ascontiguousarray(np.asarray(getattr(noise, name)))
         digest.update(str((name, array.shape, str(array.dtype))).encode())
         digest.update(array.tobytes())
-    return {"protocol": EVALUATION_PROTOCOL, "context_id": context_id,
+    identity = {"protocol": evaluation_protocol(config), "context_id": context_id,
             "source_fingerprint": prepared.graph.fingerprint,
             "candidate_fingerprints": [{"candidate_id": c.candidate_id, "fingerprint": c.graph.fingerprint}
                                        for c in candidates],
@@ -36,6 +46,10 @@ def _progress_identity(prepared, candidates, config, context_id, noise):
             "trunk_passes": config.evaluation_trunk_passes,
             "require_affinity_nonworsening": config.evaluation.require_affinity_nonworsening,
             "noise_sha256": digest.hexdigest()}
+    if config.evaluation.coverage_mode != "off":
+        identity["coverage"] = {"mode": config.evaluation.coverage_mode,
+                                "min_coverage": config.evaluation.min_coverage}
+    return identity
 
 
 def _scores(result):
@@ -111,6 +125,11 @@ def evaluate_packet(prepared, packet, config, *, backend=None, export_dir=None,
     guard = config.evaluation.require_affinity_nonworsening
     if guard and "affinity_loss" not in baseline["metrics"]:
         raise GradientError("Baseline is missing affinity_loss required by the acceptance guard")
+    coverage_mode = config.evaluation.coverage_mode
+    threshold = config.evaluation.min_coverage
+    baseline_coverage = _coverage(baseline["metrics"]) if coverage_mode != "off" else None
+    enforce_coverage = (coverage_mode == "strict" or
+                        (coverage_mode == "preserve" and baseline_coverage > threshold))
     measured, rejected = [], []
 
     def persist():
@@ -150,26 +169,44 @@ def evaluate_packet(prepared, packet, config, *, backend=None, export_dir=None,
         if guard and "affinity_loss" not in scores["metrics"]:
             raise GradientError("Candidate is missing affinity_loss required by the acceptance guard")
         affinity_ok = not guard or scores["metrics"]["affinity_loss"] <= baseline["metrics"]["affinity_loss"]
+        coverage_ok = coverage_mode == "off" or (_coverage(scores["metrics"]) > threshold or not enforce_coverage)
         improves = scores["loss"] < baseline["loss"]
-        eligible = improves and affinity_ok
+        eligible = improves and affinity_ok and coverage_ok
         measured.append({"candidate_id": candidate.candidate_id, **scores,
             "predicted_change": candidate.predicted_change,
             "actual_change": scores["loss"] - baseline["loss"],
             "eligible": eligible, "affinity_guard_passed": affinity_ok,
+            "coverage_guard_passed": coverage_ok,
+            "rejection_reasons": (["loss_not_improved"] if not improves else []) +
+                                 (["affinity_guard"] if not affinity_ok else []) +
+                                 (["coverage_guard"] if not coverage_ok else []),
             "seconds": saved["seconds"] if saved is not None else time.monotonic() - started,
             "operations": [op.to_dict() for op in candidate.operations],
             "artifacts": result.get("artifacts", {})})
         persist()
         if eligible and scores["loss"] < best_loss:
             selected_graph, selected_id, best_loss = candidate.graph, candidate.candidate_id, scores["loss"]
+    successful = []
+    if coverage_mode != "off":
+        for cid, graph, scores in [("noop", prepared.graph, baseline)] + [
+                (r["candidate_id"], packet.candidate(r["candidate_id"]).graph, r) for r in measured]:
+            metrics = scores["metrics"]
+            if metrics.get("affinity_pred_value", math.inf) < 0 and _coverage(metrics) > threshold:
+                successful.append({"candidate_id": cid, "graph": graph.to_dict(),
+                                   "loss": scores["loss"], "metrics": metrics})
     return {"status": "improved" if selected_id != "noop" else "source_retained",
         "source_fingerprint": prepared.graph.fingerprint, "baseline": baseline,
         "evaluation": {"candidate_budget": config.evaluation.candidate_budget,
-            "protocol": EVALUATION_PROTOCOL, "requested_candidates": len(candidates),
+            "protocol": evaluation_protocol(config), "requested_candidates": len(candidates),
+            "available_candidates": sum(bool(c.operations) for c in packet.candidates),
+            "selection_has_choice": sum(bool(c.operations) for c in packet.candidates) > len(candidates),
             "attempted_candidates": len(measured) + len(rejected), "rejected_candidates": len(rejected),
             "reused_candidates": len(cached),
             "evaluated_candidates": len(measured), "sampling_steps": steps, "trunk_passes": passes,
-            "seed": config.seed, "require_affinity_nonworsening": guard},
+            "seed": config.seed, "require_affinity_nonworsening": guard,
+            "coverage_mode": coverage_mode, "min_coverage": threshold,
+            "coverage_gate_active": enforce_coverage},
         "candidates": measured, "unscored_candidates": rejected,
         "selected_id": selected_id, "selected_graph": selected_graph.to_dict(),
-        "selected_loss": best_loss}
+        "selected_loss": best_loss,
+        "best_successful": min(successful, key=lambda r: r["loss"]) if successful else None}

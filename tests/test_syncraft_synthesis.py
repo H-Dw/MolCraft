@@ -58,11 +58,22 @@ def test_atomic_rationale_without_synthesis_plan_is_rejected():
         compile_example(content)
 
 
-@pytest.mark.parametrize("motif,ids",[("amide",[2]),("amine",[1]),("invented",[2]),("amine",[2,2])])
-def test_motif_claims_must_match_the_executed_product(motif,ids):
+@pytest.mark.parametrize("motif,ids",[("amide",[2]),("amine",[1]),("invented",[2])])
+def test_unmatched_motif_claims_are_flagged_without_rejecting_legal_chemistry(motif,ids):
     content=draft()
     content["synthesis"]["target_motifs"]=[{"motif":motif,"atom_ids":ids}]
-    with pytest.raises(ChemistryError):
+    _, updated, _, reason = compile_example(content)
+    assert updated.smiles == "CNC"
+    assessment = reason["synthesis_assessment"]
+    assert assessment["catalog_preferred"] and assessment["catalog_warnings"]
+    assert not assessment["matched_motifs"]
+    assert any(m["motif"]=="amine" for m in assessment["recognized_product_motifs"])
+
+
+def test_malformed_motif_atom_ids_are_still_rejected():
+    content=draft()
+    content["synthesis"]["target_motifs"]=[{"motif":"amine","atom_ids":[2,2]}]
+    with pytest.raises(ChemistryError, match="Malformed"):
         compile_example(content)
 
 
@@ -71,8 +82,7 @@ def test_changed_atoms_need_group_coverage_and_high_preference_focus():
         compile_example(focus=(1,))
     source=MolecularGraph.from_smiles("CCCCCC")
     product=apply_edits(source,[Edit("atom",(2,),"N"),Edit("atom",(5,),"O")])
-    with pytest.raises(ChemistryError,match="All edited atoms"):
-        check_plan(draft()["synthesis"],source,product,{2,5},{2})
+    assert check_plan(draft()["synthesis"],source,product,{2,5},{2})["catalog_warnings"]
 
 
 def test_whole_source_amide_replacement_must_be_explicit():
@@ -80,10 +90,9 @@ def test_whole_source_amide_replacement_must_be_explicit():
     product=apply_edits(source,[Edit("atom",(4,),"C")])
     plan=draft()["synthesis"]
     plan["target_motifs"]=[{"motif":"ketone","atom_ids":[1,2,3,4]}]
-    with pytest.raises(ChemistryError,match="every replaced"):
-        check_plan(plan,source,product,{4},{4})
+    assert check_plan(plan,source,product,{4},{4})["catalog_warnings"]
     plan["replaced_source_groups"]=["amide:2,3,4"]
-    check_plan(plan,source,product,{4},{4})
+    assert check_plan(plan,source,product,{4},{4})["catalog_preferred"]
 
 
 def test_regions_complete_groups_and_do_not_truncate_large_rings():
@@ -217,7 +226,7 @@ def test_factory_and_cli_use_the_synthesis_agent_without_extra_selection_calls(t
 
     monkeypatch.setattr(provider.DeepSeekClient,"available",lambda self:True)
     real_agent,metadata=factory.create_agent("syncraft")
-    assert isinstance(real_agent,SynCraftAgent) and metadata["agent_protocol"]=="syncraft-group-v1"
+    assert isinstance(real_agent,SynCraftAgent) and metadata["agent_protocol"]=="syncraft-group-v2"
     model_paths={}
     for name in ("structure_checkpoint","affinity_checkpoint","ccd_path"):
         target=tmp_path/name
