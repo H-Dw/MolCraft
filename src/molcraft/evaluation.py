@@ -17,6 +17,8 @@ EVALUATION_PROTOCOL = "candidate-failure-isolation-v1"
 
 
 def evaluation_protocol(config):
+    if config.optimization.strategy == "denovo":
+        return EVALUATION_PROTOCOL + "+denovo-v1+" + config.objective.protocol
     return EVALUATION_PROTOCOL + ("+coverage-v1" if config.evaluation.coverage_mode != "off" else "")
 
 
@@ -46,6 +48,8 @@ def _progress_identity(prepared, candidates, config, context_id, noise):
             "trunk_passes": config.evaluation_trunk_passes,
             "require_affinity_nonworsening": config.evaluation.require_affinity_nonworsening,
             "noise_sha256": digest.hexdigest()}
+    if config.objective.protocol == "legacy-v1":
+        identity["objective"].pop("protocol")
     if config.evaluation.coverage_mode != "off":
         identity["coverage"] = {"mode": config.evaluation.coverage_mode,
                                 "min_coverage": config.evaluation.min_coverage}
@@ -61,7 +65,7 @@ def _scores(result):
 
 
 def evaluate_packet(prepared, packet, config, *, backend=None, export_dir=None,
-                    selected_ids=None, noise=None, context_id=None):
+                    selected_ids=None, noise=None, context_id=None, preparation_cache=None):
     """Rescore at one shared depth/noise and recommend at most one legal next graph.
 
     The baseline is recomputed here; a 25-step gradient loss is never compared
@@ -155,8 +159,9 @@ def evaluate_packet(prepared, packet, config, *, backend=None, export_dir=None,
             if saved is not None:
                 result = saved
             else:
+                kwargs = {"preparation_cache": preparation_cache} if preparation_cache is not None else {}
                 result = evaluate_candidate(prepared, candidate, noise=noise, objective=config.objective,
-                    noise_seed=config.seed, backend=backend, export_dir=destination)
+                    noise_seed=config.seed, backend=backend, export_dir=destination, **kwargs)
         except ChemistryError as exc:
             if selected_ids is None:
                 raise
@@ -187,7 +192,7 @@ def evaluate_packet(prepared, packet, config, *, backend=None, export_dir=None,
         if eligible and scores["loss"] < best_loss:
             selected_graph, selected_id, best_loss = candidate.graph, candidate.candidate_id, scores["loss"]
     successful = []
-    if coverage_mode != "off":
+    if "bcov" in baseline["metrics"]:
         for cid, graph, scores in [("noop", prepared.graph, baseline)] + [
                 (r["candidate_id"], packet.candidate(r["candidate_id"]).graph, r) for r in measured]:
             metrics = scores["metrics"]

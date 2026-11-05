@@ -1,11 +1,11 @@
 """Actual JAX evaluation and input differentiation, with immutable chemistry state."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 import numpy as np
 
 from molcraft.chemistry.encoding import encode_graph, ChemistryInputs
-from molcraft.errors import ConfigurationError, GradientError, MappingError
+from molcraft.errors import ConfigurationError, GradientError, MappingError, InvalidPredictionError
 from molcraft.types import GradientEvidence
 
 
@@ -46,6 +46,7 @@ def _readouts(output, distances):
     if probability is None:
         probability = np.exp(-np.logaddexp(0.0, -float(output.affinity["affinity_logits_binary"])))
     return {"affinity_pred_value": affinity,
+            **{k: float(v) for k, v in output.confidence.items()},
             "affinity_probability_binary": float(probability),
             "ligand_iptm": float(output.confidence["ligand_iptm"]),
             "bcov": bcov, "dist": float(nearest.mean()),
@@ -109,6 +110,8 @@ class Boltz2Backend:
             np.asarray(gradient.atoms), np.asarray(gradient.bonds), np.asarray(gradient.charges),
             scalar_metrics, gradient_mode, noise_seed,
             {"sampling_steps": self.sampling_steps, "trunk_passes": self.trunk_passes,
+             "sampler_parameters": {k: float(getattr(self.bundle.structure.structure_module, k)) for k in
+                ("sigma_data", "sigma_max", "sigma_min", "rho", "gamma_0", "gamma_min", "noise_scale", "step_scale")},
              "coordinate_confidence_bins": "native_hard_bins",
              "affinity_mw_correction": False,
              "gradient_norms": {name: float(np.linalg.norm(np.asarray(g))) for name, g in
@@ -126,13 +129,42 @@ class Boltz2Backend:
         arguments = self._arguments(prepared, objective, "through_structure", noise, noise_seed)
         _, compute = _compiled_functions()
         value, (metrics, output) = compute(inputs, *arguments)
-        if not np.isfinite(np.asarray(value)).all():
-            raise GradientError("Candidate model evaluation returned a non-finite objective")
+        if not np.isfinite(np.asarray(value)).all() or not np.isfinite(np.asarray(output.coordinates)).all():
+            raise InvalidPredictionError("Model evaluation returned nonfinite loss or coordinates")
         scalars = {k: float(v) for k, v in metrics.items()}
         scalars.update(_readouts(output, _pocket_distances(output, prepared.layout)))
+        if not all(np.isfinite(v) for v in scalars.values()):
+            raise InvalidPredictionError("Model evaluation returned nonfinite diagnostics")
         return {"loss": float(value), "metrics": scalars,
                 "coordinates": np.asarray(output.coordinates),
                 "ligand_coordinates": prepared.layout.ligand_coordinates(output.coordinates)[0]}
+
+    def component_diagnostics(self, prepared, objective, gradient_mode="through_structure", noise_seed=0, noise=None):
+        """Opt-in extra backward passes; same source/depth/noise, no adaptive weighting."""
+        noise = self.draw_noise(prepared, noise_seed) if noise is None else noise
+        vectors, result = {}, {"components": {}, "cosines": {}, "additional_backward_passes": 0}
+        names = ("affinity", "contact", "confidence", "geometry")
+        for name in names:
+            if name == "geometry" and gradient_mode == "trunk_only":
+                result["components"][name] = {"status": "coordinate_gradient_disabled"}
+                continue
+            single = replace(objective, **{n + "_weight": float(n == name) for n in names})
+            evidence = self.value_and_grad(prepared, single, gradient_mode, noise_seed, noise)
+            vector = np.concatenate([evidence.atom_grad.ravel(), evidence.bond_grad.ravel(), evidence.charge_grad.ravel()])
+            vectors[name] = vector
+            weight = getattr(objective, name + "_weight")
+            result["components"][name] = {"raw_loss": evidence.metrics[name + "_loss"],
+                "weight": weight, "weighted_loss": weight * evidence.metrics[name + "_loss"],
+                "gradient_norm": float(np.linalg.norm(vector)),
+                "weighted_gradient_norm": float(np.linalg.norm(weight * vector))}
+            result["additional_backward_passes"] += 1
+        for a in vectors:
+            for b in vectors:
+                if a >= b:
+                    continue
+                denominator = np.linalg.norm(vectors[a]) * np.linalg.norm(vectors[b])
+                result["cosines"][a + ":" + b] = float(np.dot(vectors[a], vectors[b]) / denominator) if denominator > 0 else None
+        return result
 
 
 def remap_noise(noise, source_layout, target_layout):

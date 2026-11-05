@@ -149,12 +149,20 @@ def _reference_conformer(mol, seed):
     # Rebuild rings after typing, before force-field construction.
     Chem.GetSymmSSSR(expanded)
     if has_uff_parameters:
-        AllChem.UFFOptimizeMolecule(expanded, maxIters=1000)
+        try:
+            convergence = AllChem.UFFOptimizeMolecule(expanded, maxIters=1000)
+        except (ValueError, RuntimeError):
+            convergence = -1  # ETKDG remains usable; UFF support is not a synthesis gate.
+    else:
+        convergence = -1
     result = Chem.RemoveHs(expanded, sanitize=False)
     Chem.SanitizeMol(result)
     conformer = result.GetConformer()
+    if not np.isfinite(conformer.GetPositions()).all():
+        raise LigandPreparationError("Nonfinite reference coordinates", stage="reference_conformer")
     conformer.SetProp("name", "Computed")
     conformer.SetProp("coord_generation", "ETKDGv3")
+    conformer.SetIntProp("uff_convergence", convergence)
     return result
 
 

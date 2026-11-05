@@ -60,6 +60,17 @@ def test_cpu_interpreter_keeps_virtualenv_symlink_and_rejects_directory_escape(t
         queue.cpu_interpreter(tmp_path,"cpu-env/bin/missing")
 
 
+def test_denovo_queue_checks_real_inventory_before_launch(tmp_path):
+    from molcraft.errors import ConfigurationError
+    from molcraft.io.examples import prepare_example
+    prepare_example("vdr-3a2i", tmp_path/"vdr", tmp_path, work_root=tmp_path,
+                    strategy="denovo", msa_mode="single_sequence")
+    manifest = {"jobs": [{"existing": True, "strategy": "denovo", "case": "vdr-3a2i",
+                          "config": "vdr/mosaic-like.yaml"}]}
+    with pytest.raises(ConfigurationError, match="not ready"):
+        queue.prepare_jobs(tmp_path, manifest)
+
+
 @pytest.mark.parametrize("due,memory,reason,wait",[
     (1000,None,"waiting_until_due",900),
     (0,{"fraction":.1},"waiting_memory",1800),

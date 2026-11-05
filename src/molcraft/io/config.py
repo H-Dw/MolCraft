@@ -10,6 +10,7 @@ from molcraft.types import ComplexSpec, ModelPaths, ProteinSpec, ResidueRef
 from molcraft.losses.spec import ObjectiveSpec
 from molcraft.guidance.proposals import ProposalPolicy
 from molcraft.chemistry.synthesis import SynthesisPolicy
+from molcraft.agent.denovo_policy import DeNovoPolicy
 
 
 @dataclass(frozen=True)
@@ -48,8 +49,8 @@ class OptimizationSpec:
     strategy: str = "optagent"
 
     def __post_init__(self):
-        if self.strategy not in {"optagent", "argmax", "syncraft"}:
-            raise ConfigurationError("optimization.strategy must be optagent, argmax or syncraft")
+        if self.strategy not in {"optagent", "argmax", "syncraft", "denovo"}:
+            raise ConfigurationError("Unknown optimization strategy")
         values = (self.max_rounds, self.min_rounds, self.patience, self.drafts)
         if any(type(n) is not int or n < 1 for n in values):
             raise ConfigurationError("Optimization budgets must be positive integers")
@@ -70,8 +71,16 @@ class RunConfig:
     optimization: OptimizationSpec = field(default_factory=OptimizationSpec)
     msa_mode: str = "provided"
     synthesis: SynthesisPolicy = field(default_factory=SynthesisPolicy)
+    denovo: DeNovoPolicy = field(default_factory=DeNovoPolicy)
 
     def __post_init__(self):
+        if self.optimization.strategy != "denovo" and self.denovo != DeNovoPolicy():
+            raise ConfigurationError("Custom de novo settings require denovo strategy")
+        if self.optimization.strategy == "denovo":
+            if self.evaluation.coverage_mode != "off" or self.evaluation.require_affinity_nonworsening:
+                raise ConfigurationError("de novo accepts total-loss improvements; archive success separately")
+            if self.objective.protocol != "dbmol-denovo-v1":
+                raise ConfigurationError("de novo requires an explicitly versioned objective")
         if self.optimization.strategy != "syncraft" and self.synthesis != SynthesisPolicy():
             raise ConfigurationError("Custom synthesis settings require the syncraft strategy")
         if self.msa_mode not in {"provided", "single_sequence"}:
@@ -93,7 +102,7 @@ def load_config(path):
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ConfigurationError("Configuration must be a YAML mapping")
-    allowed = {"proteins", "ligand", "pocket", "model_paths", "objective", "proposal", "run", "synthesis",
+    allowed = {"proteins", "ligand", "pocket", "model_paths", "objective", "proposal", "run", "synthesis", "denovo",
                "evaluation", "optimization"}
     if set(data) - allowed:
         raise ConfigurationError(f"Unknown configuration sections: {sorted(set(data) - allowed)}")
@@ -115,7 +124,9 @@ def load_config(path):
         spec = ComplexSpec(proteins, ligand["smiles"],
             tuple(ResidueRef(p["chain_id"], p["position"]) for p in data["pocket"]),
             paths, ligand.get("chain_id", "L"), conformer_seed=run.get("seed", 0))
-        objective = ObjectiveSpec(**data.get("objective", {}))
+        denovo_mode = data.get("optimization", {}).get("strategy") == "denovo"
+        defaults = {"geometry_weight": 0.0, "protocol": "dbmol-denovo-v1"} if denovo_mode else {}
+        objective = ObjectiveSpec(**{**defaults, **data.get("objective", {})})
         policy_data = data.get("proposal", {}).copy()
         if "frozen_atom_ids" in policy_data:
             policy_data["frozen_atom_ids"] = tuple(policy_data["frozen_atom_ids"])
@@ -128,8 +139,12 @@ def load_config(path):
             raise ConfigurationError("The affinity acceptance guard requires an active affinity loss")
         optimization = OptimizationSpec(**data.get("optimization", {}))
         synthesis = SynthesisPolicy(**data.get("synthesis", {}))
+        denovo_data = data.get("denovo", {}).copy()
+        if denovo_data.get("inventory_manifest"):
+            denovo_data["inventory_manifest"] = str(resolve(denovo_data["inventory_manifest"]))
+        denovo = DeNovoPolicy(**denovo_data)
         result = RunConfig(spec, objective, policy, evaluation=evaluation,
-                           optimization=optimization, synthesis=synthesis, **run)
+                           optimization=optimization, synthesis=synthesis, denovo=denovo, **run)
         objective.validate(result.gradient_mode)
         if (type(result.sampling_steps) is not int or result.sampling_steps < 1
                 or type(result.trunk_passes) is not int or result.trunk_passes < 1

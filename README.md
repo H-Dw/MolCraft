@@ -4,10 +4,12 @@ Frozen Boltz-2 input gradients -> chemically constrained discrete ligand edits.
 
 MolCraft uses atom, undirected-bond and formal-charge derivatives to construct edit
 preferences. The current molecule remains discrete and valid. No DeFoG repair or
-continuous graph optimization is used. New example inputs use a SynCraft-guided
-LLM proposal mode with functional-group preferences, synthesis-proxy checks,
-adaptive candidate pools and measured draft feedback. Selection is deterministic;
-coverage acceptance preserves an attained pocket-coverage threshold. Legacy OptAgent and no-LLM argmax remain
+continuous graph optimization is used. The independent `denovo` Agent composes
+high-gradient-preference atom updates with evidence from real building-block inventory
+and reaction templates. It uses bounded candidate pools, shared draft feedback and
+native Boltz input preparation. Its DBMol objective uses weights 1/2.5/2.5/0;
+inventory matches give preference without excluding other legal edits. A verified
+inventory is required before running it. SynCraft, OptAgent and no-LLM argmax remain
 available for reproducing earlier trajectories.
 
 ## Design and algorithms
@@ -20,6 +22,7 @@ available for reproducing earlier trajectories.
 - [当前梯度策略、Mosaic/DBMol 对照与配置](docs/gradient_strategy_and_profiles.md)
 - [Agent / argmax 配对对照、单序列输入与延迟队列](docs/argmax_control.md)
 - [SynCraft 基团完整性与可合成性引导：审计、配置及边界](docs/syncraft_guidance.md)
+- [De novo Agent：真实数据库、权重来源、工作流程与固定轮数运行](docs/denovo_guidance.md)
 
 ## Linux CPU installation
 
@@ -91,7 +94,8 @@ optional affinity-proxy nonworsening gate. The source baseline is recomputed at
 the same depth as candidates. `next_graph.json` contains the recommended graph,
 including its hydrogen editing policy; the input is not mutated. This is one
 round. Use `molcraft optimize` for a restartable multi-round Agent trajectory.
-`prepare-example --strategy syncraft` (the new default) enables the group-guided
-protocol; `--strategy optagent` and `--strategy argmax` reproduce the old paths.
-The new synthesis protocol has CPU acceptance; its optimization performance must
-be measured in fresh trajectories rather than mixed into earlier checkpoints.
+`prepare-example --strategy denovo --inventory-manifest ...` enables the new de novo
+protocol. The example generator retains `syncraft` as its compatibility default;
+select `denovo` explicitly. `--strategy optagent` and `--strategy argmax` reproduce
+the earlier paths. Optimization performance must be measured in fresh trajectories
+rather than mixed into earlier checkpoints.

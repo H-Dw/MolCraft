@@ -153,7 +153,8 @@ class ProposalPacket:
         return result
 
 
-def direction_tables(graph: MolecularGraph, evidence: GradientEvidence, policy: ProposalPolicy):
+def direction_tables(graph: MolecularGraph, evidence: GradientEvidence, policy: ProposalPolicy,
+                     *, joint=False):
     evidence.validate(graph)
     if not set(policy.frozen_atom_ids) <= set(graph.atom_ids):
         raise ConfigurationError("Frozen atom IDs must belong to the source molecule")
@@ -204,6 +205,10 @@ def direction_tables(graph: MolecularGraph, evidence: GradientEvidence, policy: 
                 except ChemistryError as exc:
                     reasons[row][col] = str(exc)
                     rejection_counts[kind] += 1
+                    # Vocabulary/frozen constraints define proposal support. Single-edit
+                    # validity is an annotation; coupled operations can repair valence.
+                    if joint:
+                        allowed[row, col] = True
         probabilities = masked_softmax(scores[kind], allowed, policy.temperature, prior_array)
         tables[kind] = ProbabilityTable(ids, labels, scores[kind], allowed, probabilities, reasons)
         tables[kind].validate()

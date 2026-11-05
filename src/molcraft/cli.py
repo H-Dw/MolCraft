@@ -12,6 +12,13 @@ import time
 from molcraft.errors import MolCraftError
 
 
+def _inventory_preflight(config):
+    if config.optimization.strategy == "denovo":
+        from molcraft.chemistry.inventory import InventoryIndex
+        index = InventoryIndex(config.denovo.inventory_manifest or "")
+        index.close()
+
+
 def _doctor(_args):
     packages = {}
     for name in ("numpy", "rdkit", "jax", "equinox", "torch", "boltz", "joltz"):
@@ -58,6 +65,7 @@ def _demo(args):
 
 
 def _propose(args):
+    from contextlib import ExitStack
     import numpy as np
     from molcraft import prepare_complex, value_and_grad, build_proposals
     from molcraft.backends.boltz2_jax.backend import Boltz2Backend
@@ -65,25 +73,32 @@ def _propose(args):
     from molcraft.io.serialization import save_json, save_packet
 
     config = load_config(args.config)
-    with prepare_complex(config.complex) as prepared:
+    _inventory_preflight(config)
+    with prepare_complex(config.complex) as prepared, ExitStack() as stack:
         backend = Boltz2Backend.from_paths(config.complex.model_paths,
                                            config.sampling_steps, config.trunk_passes)
         evidence = value_and_grad(prepared, config.objective, config.gradient_mode,
                                   noise_seed=config.seed, backend=backend)
         output = Path(args.output)
-        if config.optimization.strategy == "syncraft":
+        if config.optimization.strategy in {"syncraft", "denovo"}:
             from molcraft.agent.argmax import create_agent
             from molcraft.optimization import _input_identity, _digest
 
-            agent, _ = create_agent("syncraft", synthesis_policy=config.synthesis)
+            agent, _ = create_agent(config.optimization.strategy, synthesis_policy=config.synthesis,
+                                    denovo_policy=config.denovo)
             key, _ = _input_identity(config)
             from molcraft.agent.history import DraftHistory
 
             history = DraftHistory(output, key)
+            extra = {}
+            if config.optimization.strategy == "denovo":
+                from molcraft.api import PreparedCandidatePool
+                pool = stack.enter_context(PreparedCandidatePool(prepared))
+                extra["prepare_candidate"] = pool.prepare_graph
             packet = agent.propose(prepared.graph, evidence, config.policy,
                 samples=config.optimization.drafts, round_index=1,
                 context_id=_digest((key, prepared.graph.fingerprint)), journal_dir=output/"requests",
-                candidate_budget=config.evaluation.candidate_budget, history=history.before(1))
+                candidate_budget=config.evaluation.candidate_budget, history=history.before(1), **extra)
             history.record_round(1, prepared.graph, packet, requests=output/"requests")
         else:
             packet = build_proposals(prepared.graph, evidence, config.policy)
@@ -103,6 +118,7 @@ def _evaluate(args):
     from molcraft.io.serialization import load_packet, save_json
 
     config = load_config(args.config)
+    _inventory_preflight(config)
     packet = load_packet(args.packet)
     with prepare_complex(config.complex) as prepared:
         backend = Boltz2Backend.from_paths(config.complex.model_paths,
@@ -119,25 +135,43 @@ def _evaluate(args):
 
 
 def _evaluate_set(args):
+    from contextlib import ExitStack
     from molcraft import prepare_complex
     from molcraft.evaluation import evaluate_packet
     from molcraft.io.config import load_config
     from molcraft.io.serialization import load_packet, save_json
 
     config = load_config(args.config)
+    _inventory_preflight(config)
     packet = load_packet(args.packet)
-    with prepare_complex(config.complex) as prepared:
+    with prepare_complex(config.complex) as prepared, ExitStack() as stack:
         kwargs = {}
-        if config.optimization.strategy == "syncraft":
+        if config.optimization.strategy in {"syncraft", "denovo"}:
             from molcraft.agent.syncraft import SynCraftAgent
             from molcraft.optimization import _input_identity, _digest
 
             key, _ = _input_identity(config)
-            kwargs = {"selected_ids": SynCraftAgent(None, policy=config.synthesis).select(
-                        packet, config.evaluation.candidate_budget),
-                      "context_id": _digest((key, prepared.graph.fingerprint))}
+            kwargs = {"context_id": _digest((key, prepared.graph.fingerprint))}
+            if config.optimization.strategy == "syncraft":
+                kwargs["selected_ids"] = SynCraftAgent(None, policy=config.synthesis).select(
+                    packet, config.evaluation.candidate_budget)
+            if config.optimization.strategy == "denovo":
+                from molcraft.agent.denovo import DeNovoAgent
+                from molcraft.api import PreparedCandidatePool
+                from molcraft.errors import ChemistryError
+                pool = stack.enter_context(PreparedCandidatePool(prepared))
+                selected = []
+                for cid in DeNovoAgent.select(packet, len(packet.candidates)):
+                    try:
+                        pool.prepare_graph(packet.candidate(cid).graph)
+                        selected.append(cid)
+                    except ChemistryError:
+                        continue
+                    if len(selected) == config.evaluation.candidate_budget:
+                        break
+                kwargs.update(selected_ids=selected, preparation_cache=pool)
         result = evaluate_packet(prepared, packet, config, export_dir=Path(args.output), **kwargs)
-        if config.optimization.strategy == "syncraft":
+        if config.optimization.strategy in {"syncraft", "denovo"}:
             from molcraft.agent.history import DraftHistory
 
             proposal_root = Path(args.packet).parent
@@ -153,7 +187,8 @@ def _prepare_example(args):
     from molcraft.io.examples import prepare_example
 
     result = prepare_example(args.case, args.output, args.model_dir, msa_source=args.msa,
-                             work_root=args.work_root, msa_mode=args.msa_mode, strategy=args.strategy)
+                             work_root=args.work_root, msa_mode=args.msa_mode, strategy=args.strategy,
+                             inventory_manifest=args.inventory_manifest)
     print(json.dumps(result, indent=2))
 
 
@@ -177,6 +212,7 @@ def _optimize(args):
         os.environ[name] = str(cache)
     os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
     config = load_config(task_path(args.work_root, args.config))
+    _inventory_preflight(config)
     config = replace(config, complex=replace(config.complex, cache_dir=temp))
     for protein in config.complex.proteins:
         if config.msa_mode == "single_sequence":
@@ -203,7 +239,10 @@ def _optimize(args):
     devices = jax.devices()
     if not devices or devices[0].platform != "gpu":
         raise ConfigurationError("The optimization CLI requires an actual GPU/DCU device")
-    agent, provider_metadata = create_agent(config.optimization.strategy, synthesis_policy=config.synthesis)
+    agent, provider_metadata = create_agent(config.optimization.strategy, synthesis_policy=config.synthesis,
+                                           denovo_policy=config.denovo)
+    from molcraft.losses.provenance import weight_audit
+    save_json(weight_audit(config), output / "weight_audit.json")
     import subprocess
     git = subprocess.run(["git", "-C", str(Path(args.work_root).resolve()), "rev-parse", "HEAD"],
                          capture_output=True, text=True, check=False)
@@ -221,6 +260,21 @@ def _optimize(args):
                       "checkpoint": str(output / "checkpoint.json")}), flush=True)
     if state["status"] == "provider_interrupted":
         raise ProviderError(state["error"])
+
+
+def _build_inventory(args):
+    from molcraft.chemistry.inventory import build_index
+    result = build_index(args.stock, args.output, release=args.release, source_url=args.source_url,
+                         templates=args.templates, template_source_url=args.template_source_url,
+                         expected_sha256=args.expected_sha256, expected_raw_count=args.expected_raw_count)
+    print(json.dumps(result, indent=2))
+
+
+def _check_inventory(args):
+    from molcraft.chemistry.inventory import InventoryIndex
+    index = InventoryIndex(args.manifest)
+    print(json.dumps(index.manifest, indent=2))
+    index.close()
 
 
 def main(argv=None):
@@ -250,7 +304,8 @@ def main(argv=None):
     example.add_argument("--case", default="vdr-3a2i", choices=("vdr-3a2i", "gba-2v3d"))
     example.add_argument("--msa")
     example.add_argument("--msa-mode", choices=("provided", "single_sequence"), default="provided")
-    example.add_argument("--strategy", choices=("syncraft", "optagent", "argmax"), default="syncraft")
+    example.add_argument("--strategy", choices=("syncraft", "optagent", "argmax", "denovo"), default="syncraft")
+    example.add_argument("--inventory-manifest", help="Real stock index manifest for denovo")
     example.add_argument("--output", required=True)
     example.add_argument("--model-dir", required=True)
     example.add_argument("--work-root", default=".")
@@ -262,6 +317,19 @@ def main(argv=None):
     search.add_argument("--stop-after", type=int)
     search.add_argument("--resume", action="store_true")
     search.set_defaults(func=_optimize)
+    inventory = commands.add_parser("build-inventory", help="Index a real Enamine stock file; never cases")
+    inventory.add_argument("--stock", required=True)
+    inventory.add_argument("--output", required=True)
+    inventory.add_argument("--release", required=True)
+    inventory.add_argument("--source-url", required=True)
+    inventory.add_argument("--expected-sha256")
+    inventory.add_argument("--expected-raw-count", type=int)
+    inventory.add_argument("--templates")
+    inventory.add_argument("--template-source-url")
+    inventory.set_defaults(func=_build_inventory)
+    check = commands.add_parser("check-inventory", help="Verify inventory provenance and content hashes")
+    check.add_argument("--manifest", required=True)
+    check.set_defaults(func=_check_inventory)
     args = parser.parse_args(argv)
     try:
         args.func(args)

@@ -1,6 +1,7 @@
 """Restartable multi-round search with stable reference noise at both depths."""
 
 from dataclasses import asdict, replace
+from contextlib import ExitStack
 import fcntl
 import hashlib
 import json
@@ -35,6 +36,30 @@ def _input_identity(config):
               for p in spec.proteins
               for name, path in (("msa", p.msa_path), ("template", p.template_path))
               if path}
+    if config.optimization.strategy == "denovo":
+        from importlib.resources import files
+        from importlib.metadata import version, PackageNotFoundError
+        from molcraft.chemistry.inventory import InventoryIndex
+
+        index = InventoryIndex(config.denovo.inventory_manifest or "")
+        inputs["inventory"] = index.manifest
+        index.close()
+        for name in ("data/denovo_guidance.md", "agent/denovo.py", "agent/denovo_policy.py",
+                     "agent/context.py", "agent/history.py", "agent/deepseek.py", "agent/optagent.py",
+                     "chemistry/inventory.py", "losses/functions.py", "losses/spec.py",
+                     "chemistry/graph.py", "chemistry/edits.py", "chemistry/encoding.py",
+                     "chemistry/mapping.py", "chemistry/vocabulary.py", "chemistry/synthesis.py",
+                     "guidance/proposals.py", "guidance/probability.py", "api.py", "evaluation.py",
+                     "backends/boltz2_jax/backend.py", "backends/boltz2_jax/features.py",
+                     "backends/boltz2_jax/forward.py", "backends/boltz2_jax/confidence.py",
+                     "backends/boltz2_jax/injection.py", "sampling/core.py", "sampling/boltz2.py", "sampling/schedules.py"):
+            inputs[name] = hashlib.sha256(files("molcraft").joinpath(*name.split("/")).read_bytes()).hexdigest()
+        inputs["runtime_versions"] = {}
+        for package in ("numpy", "rdkit", "jax", "jaxlib", "boltz", "joltz"):
+            try:
+                inputs["runtime_versions"][package] = version(package)
+            except PackageNotFoundError:
+                inputs["runtime_versions"][package] = None
     if config.optimization.strategy == "syncraft":
         from importlib.resources import files
 
@@ -49,6 +74,10 @@ def _input_identity(config):
             inputs[name] = _file_hash(getattr(paths, name))
         inputs["molecule_dir"] = str(paths.molecule_dir.resolve())
     cfg = asdict(config)
+    if config.optimization.strategy != "denovo":
+        cfg.pop("denovo")
+    if config.objective.protocol == "legacy-v1":
+        cfg["objective"].pop("protocol")
     cfg["complex"].pop("cache_dir", None)
     # A new, versioned protocol; old OptAgent/argmax identities remain intact.
     if config.optimization.strategy != "syncraft":
@@ -122,8 +151,11 @@ def _run(config, agent, output, resume, stop_after, backend, evaluation_backend,
                  "budget": asdict(config.optimization), "external_metrics": {
                      "af3": "not_evaluated", "vina": "not_evaluated"}}
         save_json(state, path)
+    from molcraft.losses.provenance import weight_audit
+    save_json(weight_audit(config), output / "weight_audit.json")
+    save_json(json.loads(json.dumps(asdict(config), default=str)), output / "effective_config.json")
     draft_history = None
-    if config.optimization.strategy == "syncraft":
+    if config.optimization.strategy in {"syncraft", "denovo"}:
         from molcraft.agent.history import DraftHistory
 
         draft_history = DraftHistory(output, key)
@@ -156,7 +188,7 @@ def _run(config, agent, output, resume, stop_after, backend, evaluation_backend,
         state.pop("error", None)
         try:
             event({"phase": "prepare", "round": index, "smiles": graph.smiles})
-            with prepare(spec) as prepared:
+            with prepare(spec) as prepared, ExitStack() as round_stack:
                 if prepared.graph.mapped_smiles != graph.mapped_smiles:
                     raise ConfigurationError("Native preparation changed the current graph")
                 prepared.graph = graph
@@ -170,6 +202,9 @@ def _run(config, agent, output, resume, stop_after, backend, evaluation_backend,
                     noise = remap_noise(gradient_noise, reference_layout, prepared.layout)
                     evidence = value_and_grad(prepared, config.objective, config.gradient_mode,
                                               noise, config.seed, backend)
+                    if config.optimization.strategy == "denovo" and config.denovo.gradient_diagnostics:
+                        evidence.metadata["component_diagnostics"] = backend.component_diagnostics(
+                            prepared, config.objective, config.gradient_mode, config.seed, noise)
                 save_json({**evidence.to_dict(), "context_id": context}, evidence_path)
                 if not (output / "feature_profile.json").exists():
                     save_json({"strategy": config.optimization.strategy, "msa_mode": config.msa_mode,
@@ -183,6 +218,12 @@ def _run(config, agent, output, resume, stop_after, backend, evaluation_backend,
                 event({"phase": "propose", "round": index})
                 proposal_context = ({"candidate_budget": config.evaluation.candidate_budget,
                                      "history": draft_history.before(index)} if draft_history else {})
+                score_context = {}
+                if config.optimization.strategy == "denovo":
+                    from molcraft.api import PreparedCandidatePool
+                    native_pool = round_stack.enter_context(PreparedCandidatePool(prepared, prepare))
+                    proposal_context["prepare_candidate"] = native_pool.prepare_graph
+                    score_context["preparation_cache"] = native_pool
                 packet = agent.propose(graph, evidence, config.policy,
                     samples=config.optimization.drafts, round_index=index, context_id=context,
                     journal_dir=requests, excluded=excluded, **proposal_context)
@@ -194,7 +235,7 @@ def _run(config, agent, output, resume, stop_after, backend, evaluation_backend,
                 event({"phase": "rescore", "round": index, "selected_ids": selected})
                 noise = remap_noise(evaluation_noise, reference_layout, prepared.layout)
                 result = score(prepared, packet, config, backend=evaluation_backend, noise=noise,
-                               selected_ids=selected, context_id=context, export_dir=round_dir)
+                               selected_ids=selected, context_id=context, export_dir=round_dir, **score_context)
             graph = MolecularGraph.from_dict(result["selected_graph"])
             save_json(result, round_dir / "evaluation.json")
             if draft_history:

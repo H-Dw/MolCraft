@@ -73,11 +73,15 @@ def evaluate_objective(output, inputs, layout, objective):
         contact = contact_loss(logits, output.distogram_bins, objective.contact_cutoff)
     if objective.confidence_weight:
         confidence = confidence_loss(output.confidence)
-    if objective.geometry_weight:
-        geometry, extra = geometry_loss(output.coordinates, inputs.atoms, layout, objective)
-        metrics.update(extra)
+    # Zero optimization weight must not turn measured geometry into a fake zero.
+    geometry, extra = geometry_loss(output.coordinates, inputs.atoms, layout, objective)
+    metrics.update(extra)
     total = (objective.affinity_weight * affinity + objective.contact_weight * contact
              + objective.confidence_weight * confidence + objective.geometry_weight * geometry)
     metrics.update({"loss": total, "affinity_loss": affinity, "contact_loss": contact,
                     "confidence_loss": confidence, "geometry_loss": geometry})
+    metrics.update({"weighted_affinity": objective.affinity_weight * affinity,
+                    "weighted_contact": objective.contact_weight * contact,
+                    "weighted_confidence": objective.confidence_weight * confidence,
+                    "weighted_geometry": objective.geometry_weight * geometry})
     return total, metrics

@@ -11,3 +11,4 @@ outputs/
 *.ckpt
 *.pt
 *.pkl
+data/inventory/

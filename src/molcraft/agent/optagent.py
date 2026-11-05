@@ -102,12 +102,13 @@ def _stereo(graph):
     return result
 
 
-def compile_draft(graph, evidence, content, region, frozen, case_ids):
+def compile_draft(graph, evidence, content, region, frozen, case_ids, *,
+                  max_operations=8, max_touched=6):
     if set(content) != {"operations", "rationale", "case_ids"}:
         raise ChemistryError("Draft requires operations, rationale and case_ids")
     raw = content["operations"]
-    if not isinstance(raw, list) or not 1 <= len(raw) <= 8:
-        raise ChemistryError("Draft must contain one to eight operations")
+    if not isinstance(raw, list) or not raw or (max_operations is not None and len(raw) > max_operations):
+        raise ChemistryError("Draft exceeds its operation budget")
     cited = content["case_ids"]
     if not isinstance(cited, list) or len(cited) > 5 or not set(cited) <= case_ids:
         raise ChemistryError("Unknown case reference")
@@ -116,9 +117,12 @@ def compile_draft(graph, evidence, content, region, frozen, case_ids):
         raise ChemistryError("Rationale must be brief")
     if any(not isinstance(op, dict) or set(op) != {"kind", "atom_ids", "value"} for op in raw):
         raise ChemistryError("Malformed edit operation")
-    operations = tuple(Edit.from_dict(op) for op in raw)
+    try:
+        operations = tuple(Edit.from_dict(op) for op in raw)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ChemistryError(f"Malformed operation: {exc}") from exc
     touched = {i for op in operations for i in op.atom_ids}
-    if len(touched) > 6 or not touched <= region or touched & frozen:
+    if (max_touched is not None and len(touched) > max_touched) or not touched <= region or touched & frozen:
         raise ChemistryError("Draft exceeds its editable neighborhood or touches a frozen atom")
     updated = apply_edits(graph, operations)
     if updated.smiles == graph.smiles:
@@ -240,7 +244,7 @@ class OptAgent:
             candidates.append(EditCandidate(cid, graph.fingerprint, ops, updated, score))
             explanations[cid] = reason
         scores = np.asarray([[c.predicted_change for c in candidates]])
-        probabilities = masked_softmax(scores, np.ones_like(scores, dtype=bool), 1.0)[0]
+        probabilities = masked_softmax(scores, np.ones_like(scores, dtype=bool), policy.temperature)[0]
         for candidate, probability in zip(candidates, probabilities):
             candidate.probability = float(probability)
         return ProposalPacket(graph, tables["atom"], tables["bond"], tables["charge"],

@@ -1,6 +1,7 @@
 """High-level entry points; model construction is explicit or cached per prepared complex."""
 
 from dataclasses import replace
+from contextlib import ExitStack, nullcontext
 
 from molcraft.chemistry.edits import apply_edits
 from molcraft.errors import ConfigurationError, StaleProposalError
@@ -33,7 +34,7 @@ def value_and_grad(prepared, objective=None, gradient_mode="through_structure", 
 
 
 def evaluate_candidate(prepared, candidate, noise=None, objective=None, noise_seed=0, backend=None,
-                       export_dir=None):
+                       export_dir=None, preparation_cache=None):
     if candidate.source_fingerprint != prepared.graph.fingerprint:
         raise StaleProposalError("Candidate belongs to a different source molecule")
     actual = apply_edits(prepared.graph, candidate.operations)
@@ -47,7 +48,9 @@ def evaluate_candidate(prepared, candidate, noise=None, objective=None, noise_se
     spec = replace(prepared.spec, ligand_smiles=actual.mapped_smiles)
     from molcraft.backends.boltz2_jax.backend import remap_noise
 
-    with prepare_complex(spec) as updated:
+    context = (nullcontext(preparation_cache.get(prepared, actual)) if preparation_cache is not None
+               else prepare_complex(spec))
+    with context as updated:
         if updated.graph.mapped_smiles != actual.mapped_smiles:
             raise ConfigurationError("Native candidate preparation changed chemistry")
         updated.graph = actual  # preserve original explicit/implicit hydrogen editing policy
@@ -59,6 +62,41 @@ def evaluate_candidate(prepared, candidate, noise=None, objective=None, noise_se
         if export_dir is not None:
             result["artifacts"] = export_prediction(updated, actual, result, export_dir)
         return result
+
+
+class PreparedCandidatePool:
+    """Round-scoped native preparation, reused verbatim by evaluation and then closed."""
+
+    def __init__(self, source, prepare=prepare_complex):
+        self.source = source
+        self.source_fingerprint = source.graph.fingerprint
+        self.spec = source.spec
+        self.prepare = prepare
+        self.stack = ExitStack()
+        self.entries = {}
+
+    def prepare_graph(self, graph):
+        if graph.fingerprint not in self.entries:
+            updated = self.stack.enter_context(self.prepare(replace(self.spec, ligand_smiles=graph.mapped_smiles)))
+            if updated.graph.mapped_smiles != graph.mapped_smiles:
+                raise ConfigurationError("Native candidate preparation changed chemistry")
+            updated.graph = graph
+            self.entries[graph.fingerprint] = updated
+        return self.entries[graph.fingerprint]
+
+    def get(self, source, graph):
+        if source.graph.fingerprint != self.source_fingerprint or source.spec != self.spec:
+            raise StaleProposalError("Native preparation cache belongs to another source/configuration")
+        if graph.fingerprint not in self.entries:
+            raise ConfigurationError("Candidate has not passed native input preparation")
+        return self.entries[graph.fingerprint]
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.stack.__exit__(*args)
+        self.entries.clear()
 
 
 def export_prediction(prepared, graph, result, export_dir):

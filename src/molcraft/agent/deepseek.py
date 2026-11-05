@@ -52,7 +52,9 @@ class DeepSeekClient:
 
     def available(self):
         result = self._request("/models")
-        return any(row.get("id") == self.model for row in result.get("data", []))
+        if not isinstance(result, dict) or not isinstance(result.get("data"), list):
+            raise ProviderError("DeepSeek returned an invalid model list", retryable=True)
+        return any(isinstance(row, dict) and row.get("id") == self.model for row in result["data"])
 
     def complete(self, messages):
         response = self._request("/chat/completions", {
@@ -61,7 +63,11 @@ class DeepSeekClient:
             "response_format": {"type": "json_object"}, "max_tokens": 16384,
             "stream": False,
         })
-        raw_usage = response.get("usage", {})
+        if not isinstance(response, dict):
+            raise ProviderError("DeepSeek returned a null or non-object response", retryable=True)
+        raw_usage = response.get("usage") or {}
+        if not isinstance(raw_usage, dict):
+            raw_usage = {}
         usage = {k: v for k, v in raw_usage.items() if type(v) is int and v >= 0}
         details = raw_usage.get("completion_tokens_details", {})
         if isinstance(details, dict) and type(details.get("reasoning_tokens")) is int:

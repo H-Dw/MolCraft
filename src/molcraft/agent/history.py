@@ -17,11 +17,16 @@ def request_records(directory, source, round_index, slot=None):
         content = receipt.get("content", {})
         if not isinstance(content, dict):
             content = {}
-        records.append({"round": round_index, "source_fingerprint": source,
+        base = {"round": round_index, "source_fingerprint": source,
                         "receipt": path.name, "status": receipt["status"],
                         "operations": content.get("operations", []),
                         "content": content, "usage": receipt.get("usage", {}),
-                        **({"error": receipt["error"]} if "error" in receipt else {})})
+                        **({"error": receipt["error"]} if "error" in receipt else {})}
+        records.append(base)
+        for i, draft in enumerate(content.get("drafts", [])):
+            if isinstance(draft, dict):
+                records.append({**base, "receipt": f"{path.name}#draft-{i}",
+                                "content": draft, "operations": draft.get("operations", []), "usage": {}})
     return records
 
 
@@ -63,9 +68,16 @@ class DraftHistory:
                     "design": packet.diagnostics.get("agent_explanations", {}).get(candidate.candidate_id, {}),
                     **{k: assessment[k] for k in ("loss", "actual_change", "metrics", "error",
                         "affinity_guard_passed", "coverage_guard_passed") if k in assessment}})
+        attempts = request_records(requests, graph.fingerprint, round_index)
+        if packet is not None and packet.diagnostics.get("strategy") == "denovo":
+            outcomes = {c["smiles"]: c["outcome"] for c in candidates}
+            attempts += [{**record, "receipt": f"compiled-{i}",
+                          "outcome": outcomes.get(record.get("smiles"), record.get("outcome")),
+                          "status": outcomes.get(record.get("smiles"), record.get("outcome"))}
+                         for i, record in enumerate(packet.diagnostics.get("feedback", []))]
         row = {"round": round_index, "source_fingerprint": graph.fingerprint,
                "source_smiles": graph.smiles, "candidates": candidates,
-               "attempts": request_records(requests, graph.fingerprint, round_index),
+               "attempts": attempts,
                "baseline": result.get("baseline"), "selected_id": result.get("selected_id"),
                "pool": packet.diagnostics.get("pool", {}) if packet else {}, "error": error}
         self.data["rounds"] = sorted([r for r in self.data["rounds"] if r["round"] != round_index] + [row],
@@ -74,7 +86,7 @@ class DraftHistory:
         self._markdown()
 
     def _markdown(self):
-        lines = ["# SynCraft draft history", "", "Generated from draft_history.json; missing metrics were not measured.",
+        lines = ["# Agent draft history", "", "Generated from draft_history.json; missing metrics were not measured.",
                  "Exact operation combinations are source-specific. Do not copy atom IDs from another source.", ""]
         for row in self.data["rounds"]:
             lines += [f"## Round {row['round']}", "", f"Source: `{row['source_smiles']}`", "",

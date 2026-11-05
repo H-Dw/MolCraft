@@ -105,6 +105,8 @@ def test_legacy_identity_is_preserved_and_new_modes_are_distinct():
     legacy = replace(config(), optimization=OptimizationSpec(), msa_mode="provided")
     data = asdict(legacy)
     data.pop("synthesis")
+    data.pop("denovo")
+    data["objective"].pop("protocol")
     data["complex"].pop("cache_dir")
     data.pop("msa_mode")
     data["optimization"].pop("strategy")

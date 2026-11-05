@@ -17,6 +17,10 @@ class LigandPreparationError(ChemistryError):
         self.stage = stage
 
 
+class InvalidPredictionError(ChemistryError):
+    stage = "model_prediction"
+
+
 class MappingError(MolCraftError):
     pass
 

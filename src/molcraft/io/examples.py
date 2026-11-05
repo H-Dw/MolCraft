@@ -96,8 +96,8 @@ def _read_msa(case, source):
 
 
 def prepare_example(case_id, output, model_dir, *, msa_source=None, work_root=".",
-                    msa_mode="provided", strategy="syncraft"):
-    if strategy not in {"syncraft", "optagent", "argmax"}:
+                    msa_mode="provided", strategy="syncraft", inventory_manifest=None):
+    if strategy not in {"syncraft", "optagent", "argmax", "denovo"}:
         raise ConfigurationError("Unknown optimization strategy")
     if msa_mode not in {"provided", "single_sequence"}:
         raise ConfigurationError("Unknown MSA mode")
@@ -167,6 +167,16 @@ def prepare_example(case_id, output, model_dir, *, msa_source=None, work_root=".
             config["evaluation"].update(coverage_mode="preserve", min_coverage=0.5)
             config["synthesis"] = {"protocol_version": "syncraft-group-v2",
                                    "pool_multiplier": 2.0, "max_drafts": 32, "draft_batch_size": 2}
+        if strategy == "denovo":
+            config["objective"] = {"protocol": "dbmol-denovo-v1", "affinity_weight": 1.0,
+                                   "contact_weight": 2.5, "confidence_weight": 2.5, "geometry_weight": 0.0}
+            config["evaluation"].update(require_affinity_nonworsening=False, coverage_mode="off")
+            rounds = (17 if case_id == "gba-2v3d" else 16) if formal else 1
+            config["optimization"].update(max_rounds=rounds, min_rounds=rounds, drafts=4)
+            manifest = Path(inventory_manifest).resolve() if inventory_manifest else (
+                Path(work_root).resolve() / "data/inventory/enamine_us_202610.sqlite.manifest.json")
+            config["denovo"] = {"inventory_manifest": str(manifest),
+                                "target_pool": 16, "batch_size": 4, "max_batches": 8}
         task_path(work_root, output / f"{profile}.yaml").write_text(
             yaml.safe_dump(config, sort_keys=False), encoding="utf-8", newline="\n")
     return metadata

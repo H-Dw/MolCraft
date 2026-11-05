@@ -39,8 +39,7 @@ def test_coverage_guards_keep_a_success_floor_without_blocking_initial_search(
     monkeypatch.setattr("molcraft.api.evaluate_candidate",rescore)
     result=evaluate_packet(SimpleNamespace(graph=graph),packet,cfg,backend=Backend())
     assert result["selected_id"]==options[expected].candidate_id
-    if mode!="off":
-        assert result["best_successful"]["metrics"]["bcov"]>.5
+    assert result["best_successful"]["metrics"]["bcov"]>.5
     if expected==1:
         assert "coverage_guard" in result["candidates"][0]["rejection_reasons"]
 

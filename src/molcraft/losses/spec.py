@@ -1,4 +1,4 @@
-"""Explicit initial objective parameters; these are not scientifically calibrated."""
+"""DBMol-derived coefficients plus explicitly versioned local extensions."""
 
 from dataclasses import dataclass
 import math
@@ -16,8 +16,15 @@ class ObjectiveSpec:
     geometry_cutoff: float = 6.0
     softmin_temperature: float = 0.5
     clash_scale: float = 0.75
+    protocol: str = "legacy-v1"
+
+    @classmethod
+    def denovo(cls):
+        return cls(geometry_weight=0.0, protocol="dbmol-denovo-v1")
 
     def validate(self, mode="through_structure"):
+        if self.protocol not in {"legacy-v1", "dbmol-denovo-v1"}:
+            raise ConfigurationError("Unknown objective protocol")
         weights = (self.affinity_weight, self.contact_weight, self.confidence_weight,
                    self.geometry_weight)
         if any(not math.isfinite(w) or w < 0 for w in weights) or not any(weights):
