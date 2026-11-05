@@ -40,6 +40,9 @@ def create_agent(strategy, *, synthesis_policy=None, denovo_policy=None):
         return agent, {"api_models_http": None, "model": client.model,
                        "agent_protocol": agent.policy.protocol,
                        "chemical_evidence": agent.evidence.resource_metadata(),
+                       "api_retry_policy": {"max_retries": agent.policy.max_api_retries,
+                                            "max_attempts": agent.policy.max_api_retries + 1,
+                                            "backoff_seconds": [1, 2, 4]},
                        "synthesis_evidence": "soft_product_pattern_reference_with_optional_stock_not_route_validation"}
     if not client.available():
         raise ProviderError("DeepSeek models endpoint did not list deepseek-flash")

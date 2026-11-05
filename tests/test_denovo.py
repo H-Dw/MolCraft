@@ -182,13 +182,13 @@ def test_empty_responses_and_pool_shortfall_are_bounded(inventory, tmp_path):
     agent = DeNovoAgent(client, DeNovoPolicy(max_batches=2, fallback_attempts=1), inventory)
     graph = MolecularGraph.from_smiles("CCC")
     packet = propose(agent, graph, journal_dir=tmp_path / "round" / "requests")
-    assert len(client.messages) == 4
+    assert len(client.messages) == 8
     assert packet.diagnostics["pool"]["shortfall"] > 0
     assert packet.diagnostics["funnel"]["fallback_attempts"] == 1
     assert len(agent.select(packet, 8)) <= 8
     assert (tmp_path / "round" / "draft_feedback.md").exists()
     replay = propose(agent, graph, journal_dir=tmp_path / "round" / "requests")
-    assert len(client.messages) == 4 and replay.to_dict() == packet.to_dict()
+    assert len(client.messages) == 8 and replay.to_dict() == packet.to_dict()
 
 
 @pytest.mark.parametrize("response", [None, [], {"usage": None, "choices": None},

@@ -80,7 +80,7 @@ def test_duplicate_storm_is_bounded_and_reports_pool_shortfall(tmp_path):
     assert len(packet.candidates)==2
     assert packet.diagnostics["attempted_samples"]==4
     assert packet.diagnostics["pool"]["shortfall"]==3
-    assert client.calls<=8
+    assert client.calls<=16
     assert all(json.loads(p.read_text()).get("content") for p in tmp_path.glob("draft-*-*.json"))
     before=client.calls
     replay=agent.propose(graph,evidence(graph),ProposalPolicy(),samples=1,round_index=1,
@@ -245,13 +245,14 @@ def test_operation_history_from_another_source_does_not_ban_a_new_analog():
 
 def test_failed_json_preserves_usage_and_finish_reason(tmp_path,monkeypatch):
     client=DeepSeekClient()
+    client.retry_backoff_seconds=0
     monkeypatch.setattr(client,"_request",lambda *args:{
         "choices":[{"finish_reason":"length","message":{"content":"{"}}],
         "usage":{"prompt_tokens":100,"completion_tokens":200,"total_tokens":300,
                  "prompt_cache_hit_tokens":50,"completion_tokens_details":{"reasoning_tokens":180}}})
     with pytest.raises(ProviderError):
         RequestJournal(tmp_path,bind_messages=True).request("draft-00",client,[],lambda c:c)
-    receipt=json.loads((tmp_path/"draft-00-2.json").read_text())
+    receipt=json.loads((tmp_path/"draft-00-4.json").read_text())
     assert receipt["usage"]["total_tokens"]==300
     assert receipt["usage"]["reasoning_tokens"]==180 and receipt["finish_reason"]=="length"
     with pytest.raises(StaleProposalError):

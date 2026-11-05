@@ -34,7 +34,7 @@ class DeNovoAgent:
             raise ConfigurationError("de novo requires the actual native candidate preparation callback")
         tables, raw, _ = direction_tables(graph, evidence, policy, joint=True)
         frozen = set(policy.frozen_atom_ids)
-        journal = RequestJournal(journal_dir, bind_messages=True)
+        journal = RequestJournal(journal_dir, bind_messages=True, max_retries=self.policy.max_api_retries)
         target = max(self.policy.target_pool, candidate_budget + 1)
         proposals, seen_graphs, seen_ops = [], {graph.smiles, *excluded}, set()
         feedback, counts = [], Counter()

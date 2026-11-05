@@ -111,7 +111,7 @@ def test_provider_journal_does_not_reissue_reserved_slots(tmp_path):
     for _ in range(2):
         with pytest.raises(ProviderError, match="exhausted"):
             RequestJournal(tmp_path).request("draft", service, [], lambda result: result)
-    assert service.calls == 1
+    assert service.calls == 3
 
 
 def test_resume_and_cross_round_noise(tmp_path):

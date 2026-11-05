@@ -42,6 +42,7 @@ def prepare_configs(gba, vdr, output, inventory_manifest=None, *, evidence_manif
         data["denovo"] = {"protocol": "denovo-motif-v2", "evidence_manifest": str(manifest),
                           "target_pool": 16, "batch_size": 4, "max_batches": 8,
                           "fallback_attempts": 64, "evidence_cards": 6, "gradient_diagnostics": False}
+        data["denovo"]["max_api_retries"] = 3
         if inventory_manifest:
             data["denovo"]["inventory_manifest"] = str(Path(inventory_manifest).resolve())
         with destination.open("x", encoding="utf-8") as handle:

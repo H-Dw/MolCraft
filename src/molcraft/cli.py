@@ -230,6 +230,8 @@ def _optimize(args):
     devices = jax.devices()
     if not devices or devices[0].platform != "gpu":
         raise ConfigurationError("The optimization CLI requires an actual GPU/DCU device")
+    if os.environ.get("MOLCRAFT_EXPECT_SINGLE_GPU") == "1" and len(devices) != 1:
+        raise ConfigurationError("The assigned trajectory must see exactly one GPU/DCU")
     agent, provider_metadata = create_agent(config.optimization.strategy, synthesis_policy=config.synthesis,
                                            denovo_policy=config.denovo)
     from molcraft.losses.provenance import weight_audit
@@ -239,6 +241,9 @@ def _optimize(args):
                          capture_output=True, text=True, check=False)
     save_json({"device": str(devices[0]), "kind": devices[0].device_kind,
                "jax": jax.__version__, "commit": git.stdout.strip() or None,
+               "device_count": len(devices),
+               "device_visibility": {k: os.environ.get(k) for k in
+                   ("HIP_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES")},
                "strategy": config.optimization.strategy, "msa_mode": config.msa_mode,
                **provider_metadata}, output / "runtime.json")
 

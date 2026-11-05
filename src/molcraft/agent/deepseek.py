@@ -2,6 +2,7 @@
 
 import json
 import hashlib
+from http.client import HTTPException
 import os
 from pathlib import Path
 import socket
@@ -9,7 +10,7 @@ import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from molcraft.errors import MolCraftError, StaleProposalError
+from molcraft.errors import ConfigurationError, MolCraftError, StaleProposalError
 from molcraft.io.serialization import save_json
 
 
@@ -25,6 +26,7 @@ class ProviderError(MolCraftError):
 class DeepSeekClient:
     model = "deepseek-flash"
     base_url = "https://api.deepseek.com"
+    retry_backoff_seconds = 1.0
 
     def __init__(self, timeout=600):
         self.timeout = timeout
@@ -43,7 +45,7 @@ class DeepSeekClient:
         except HTTPError as exc:
             retryable = exc.code in (408, 429) or 500 <= exc.code < 600
             raise ProviderError(f"DeepSeek HTTP {exc.code}", retryable=retryable) from None
-        except (URLError, socket.timeout, ConnectionError, OSError) as exc:
+        except (URLError, socket.timeout, ConnectionError, OSError, HTTPException) as exc:
             raise ProviderError(f"DeepSeek transport: {type(exc).__name__}",
                                 retryable=True) from None
         except (UnicodeError, ValueError):
@@ -88,17 +90,20 @@ class DeepSeekClient:
 
 
 class RequestJournal:
-    """Each logical request has two slots. A reservation survives process loss."""
+    """Initial request plus up to three retries; reservations survive process loss."""
 
-    def __init__(self, root, *, bind_messages=False):
+    def __init__(self, root, *, bind_messages=False, max_retries=3):
+        if type(max_retries) is not int or not 0 <= max_retries <= 3:
+            raise ConfigurationError("API max_retries must be an integer between 0 and 3")
         self.root = Path(root) if root is not None else None
         self.bind_messages = bind_messages
+        self.max_retries = max_retries
 
     def request(self, slot, client, messages, validate):
         feedback = None
         feedback_content = None
         status = "interrupted_request"
-        for attempt in (1, 2):
+        for attempt in range(1, self.max_retries + 2):
             context = messages
             if feedback:
                 if self.bind_messages and isinstance(feedback_content, dict):
@@ -110,21 +115,32 @@ class RequestJournal:
             path = self.root / f"{slot}-{attempt}.json" if self.root else None
             if path and path.exists():
                 receipt = json.loads(path.read_text(encoding="utf-8"))
+                if receipt.get("max_retries", self.max_retries) != self.max_retries:
+                    raise StaleProposalError("Saved LLM request has a different retry budget")
                 if self.bind_messages and receipt.get("message_hash") != binding["message_hash"]:
                     raise StaleProposalError("Saved LLM request has a different prompt or feedback")
                 status = receipt["status"]
                 if status == "ok":
                     return validate(receipt["content"])
-                feedback = receipt.get("error", "Prior call interrupted")
-                feedback_content = receipt.get("content")
+                if status == "provider_error" and receipt.get("retryable") is False:
+                    raise ProviderError(receipt["error"], usage=receipt.get("usage"),
+                                        finish_reason=receipt.get("finish_reason"))
+                feedback = receipt.get("error") if status == "invalid" else None
+                feedback_content = receipt.get("content") if status == "invalid" else None
                 continue
             if path:
                 path.parent.mkdir(parents=True, exist_ok=True)
                 with path.open("x", encoding="utf-8") as handle:
-                    json.dump({"status": "reserved", **binding}, handle)
+                    json.dump({"status": "reserved", **binding, "attempt": attempt,
+                               "max_retries": self.max_retries}, handle)
                     handle.flush()
                     os.fsync(handle.fileno())
             started = time.monotonic()
+            delay = float(getattr(client, "retry_backoff_seconds", 0)) * (2 ** (attempt - 2)) if attempt > 1 else 0.0
+            if delay:
+                time.sleep(delay)
+            attempt_metadata = {"attempt": attempt, "max_retries": self.max_retries,
+                                "retry_delay_seconds": delay}
             usage = {}
             content = None
             try:
@@ -134,21 +150,22 @@ class RequestJournal:
             except ProviderError as exc:
                 usage = exc.usage
                 status = "provider_error"
-                receipt = {"status": status, "error": str(exc), "finish_reason": exc.finish_reason}
+                receipt = {"status": status, "error": str(exc), "finish_reason": exc.finish_reason,
+                           "retryable": exc.retryable}
                 if not exc.retryable:
                     if path:
-                        save_json({**receipt, **binding, "usage": usage,
+                        save_json({**receipt, **binding, **attempt_metadata, "usage": usage,
                                    "seconds": time.monotonic() - started}, path)
                     raise
             except (MolCraftError, ValueError, TypeError, KeyError) as exc:
                 status = "invalid"
                 receipt = {"status": status, "error": str(exc)[:300], "content": content}
             if path:
-                save_json({**receipt, **binding, "usage": usage, "seconds": time.monotonic() - started}, path)
+                save_json({**receipt, **binding, **attempt_metadata, "usage": usage, "seconds": time.monotonic() - started}, path)
             if receipt["status"] == "ok":
                 return result
-            feedback = receipt["error"]
-            feedback_content = receipt.get("content")
+            feedback = receipt.get("error") if receipt["status"] == "invalid" else None
+            feedback_content = receipt.get("content") if receipt["status"] == "invalid" else None
         if status == "invalid":
             return None
         raise ProviderError("DeepSeek request budget exhausted after transport failure",

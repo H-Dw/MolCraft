@@ -24,6 +24,7 @@ available for reproducing earlier trajectories.
 - [SynCraft 基团完整性与可合成性引导：审计、配置及边界](docs/syncraft_guidance.md)
 - [De novo Agent：真实数据库、权重来源、工作流程与固定轮数运行](docs/denovo_guidance.md)
 - [VDR 最新 AF3 MSA：完整输入、来源校验与旧单序列配置升级](docs/vdr_msa_20261105.md)
+- [GBA / VDR 双 GPU 并行运行与 API 重试](docs/parallel_denovo.md)
 
 ## Linux CPU installation
 
