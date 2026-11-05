@@ -42,7 +42,9 @@ def a3m_records(raw, sequence):
             continue
         if line.startswith(">"):
             records.append((line, []))
-        elif records and re.fullmatch(r"[ACDEFGHIKLMNPQRSTVWYXacdefghiklmnpqrstvwyx-]+", line):
+        # Native Boltz accepts all IUPAC letters, mapping B/Z/J/O/U to UNK.
+        # Preserve those bytes and lowercase insertion residues in the source MSA.
+        elif records and re.fullmatch(r"[A-Za-z-]+", line):
             records[-1][1].append(line)
         else:
             raise ConfigurationError("A3M has an unsupported line or residue symbol")
@@ -69,6 +71,21 @@ def normalized_a3m(raw, sequence):
         raise ConfigurationError("A3M must contain a distinct aligned homolog")
     output = "".join(f"{header}\n{row}\n" for header, row in selected).encode("ascii")
     return output, len(records), len(selected)
+
+
+def validate_msa_input(path, sequence):
+    """Check a complete A3M and its import receipt before initializing the device."""
+    path = Path(path)
+    raw = path.read_bytes()
+    records = a3m_records(raw, sequence)
+    if len(records) < 2:
+        raise ConfigurationError("Optimization requires a query and at least one AF3 MSA homolog")
+    metadata = json.loads(path.with_name("msa-provenance.json").read_text(encoding="utf-8"))
+    if (metadata.get("msa_sha256") != hashlib.sha256(raw).hexdigest()
+            or metadata.get("input_depth") != len(records)
+            or metadata.get("sequence_sha256") != hashlib.sha256(sequence.encode()).hexdigest()):
+        raise ConfigurationError("AF3 MSA differs from the verified example import")
+    return metadata
 
 
 def _read_msa(case, source):
@@ -122,8 +139,15 @@ def prepare_example(case_id, output, model_dir, *, msa_source=None, work_root=".
         raw, archive_sha = _read_msa(case, msa_source)
         sha = hashlib.sha256(raw).hexdigest()
         if case.get("msa_sha256") and sha != case["msa_sha256"]:
-            raise ConfigurationError("GBA A3M does not match the pinned AF3 export")
-        msa, raw_count, used_count = normalized_a3m(raw, sequence)
+            raise ConfigurationError(f"{case_id} A3M does not match the pinned AF3 export")
+        preserve = case.get("preserve_msa", False)
+        if preserve:
+            records = a3m_records(raw, sequence)
+            if len(records) < 2:
+                raise ConfigurationError("A3M must contain a query and homologs")
+            msa, raw_count, used_count = raw, len(records), len(records)
+        else:
+            msa, raw_count, used_count = normalized_a3m(raw, sequence)
         path = task_path(work_root, output / "input.a3m")
         task_path(work_root, output / "original.a3m").write_bytes(raw)
         path.write_bytes(msa)
@@ -131,7 +155,9 @@ def prepare_example(case_id, output, model_dir, *, msa_source=None, work_root=".
                     "archive_sha256": archive_sha, "source_sha256": sha,
                     "msa_sha256": hashlib.sha256(msa).hexdigest(),
                     "sequence_sha256": case["sequence_sha256"],
-                    "raw_depth": raw_count, "input_depth": used_count}
+                    "raw_depth": raw_count, "input_depth": used_count,
+                    "preprocessing": "preserved_original" if preserve else "deduplicate_and_cap_1024",
+                    "native_processing": "Boltz native deduplication and configured model MSA subsampling"}
     else:
         metadata = {"status": "ready", "case": case_id, "source": "single_sequence",
                     "sequence_sha256": case["sequence_sha256"], "raw_depth": 1, "input_depth": 1,

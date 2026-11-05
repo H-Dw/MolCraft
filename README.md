@@ -23,6 +23,7 @@ available for reproducing earlier trajectories.
 - [Agent / argmax 配对对照、单序列输入与延迟队列](docs/argmax_control.md)
 - [SynCraft 基团完整性与可合成性引导：审计、配置及边界](docs/syncraft_guidance.md)
 - [De novo Agent：真实数据库、权重来源、工作流程与固定轮数运行](docs/denovo_guidance.md)
+- [VDR 最新 AF3 MSA：完整输入、来源校验与旧单序列配置升级](docs/vdr_msa_20261105.md)
 
 ## Linux CPU installation
 

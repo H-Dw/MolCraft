@@ -249,7 +249,8 @@ def summarize(root, manifest, state, destination):
             record["final_metrics"] = selected.get("metrics", {})
             record["final_artifacts"] = selected.get("artifacts", {})
         records.append(record)
-    write_json(destination / "comparison.json", {"single_seed": True, "targets_use_different_msa_modes": True,
+    write_json(destination / "comparison.json", {"single_seed": True,
+               "targets_use_different_msa_modes": len({job["msa_mode"] for job in manifest["jobs"]}) > 1,
                "affinity_is_predicted_not_experimental": True, "trajectories": records})
     fields = ["job", "strategy", "msa_mode", "queue_status", "trajectory_status", "completed_rounds",
               "accepted_edits", "candidate_evaluations", "candidate_attempts", "candidate_rejections",

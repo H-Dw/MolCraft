@@ -170,11 +170,14 @@ RDKit 版本、原文件及索引 SHA-256。保留电荷、氢和立体化学，
 python scripts/prepare_denovo_run.py \
   --gba-config outputs/syncraft-v2-fixed-rounds-20261105/configs/GBA.yaml \
   --vdr-config outputs/syncraft-v2-fixed-rounds-20261105/configs/VDR.yaml \
+  --vdr-msa outputs/vdr-msa-20261105/input/input.a3m \
   --evidence-manifest data/inventory/uspto_simpretro.sqlite.manifest.json \
   --output outputs/denovo-templates-20261105/configs
 ```
 
 生成配置固定 GBA 17 轮、VDR 16 轮，`min_rounds=max_rounds`，每轮最多 8 次复评。
+VDR 已改用 2026-11-05 AF3 完整 unpaired MSA，来源与模型内部抽样区别见
+[VDR MSA 更新记录](vdr_msa_20261105.md)。旧单序列结果保留原身份，不能作为有 MSA 的结果标注。
 `prepare-example --strategy denovo --evidence-manifest ...` 也可以生成新输入，但配对比较时
 应优先复用旧输入。模板索引校验通过后即可使用既有 DCU 启动环境和顺序队列，分别
 运行 GBA 然后 VDR。Enamine 只在需要库存增强或另行开展逆合成/采购评估时配置。

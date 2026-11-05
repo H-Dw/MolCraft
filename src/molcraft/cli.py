@@ -194,11 +194,10 @@ def _prepare_example(args):
 
 def _optimize(args):
     from dataclasses import replace
-    import hashlib
 
     from molcraft.errors import ConfigurationError
     from molcraft.io.config import load_config
-    from molcraft.io.examples import a3m_records, task_path
+    from molcraft.io.examples import validate_msa_input, task_path
     from molcraft.io.serialization import save_json
 
     output = task_path(args.work_root, args.output)
@@ -220,16 +219,8 @@ def _optimize(args):
         if protein.msa_path is None:
             raise ConfigurationError("Optimization requires a verified local AF3 A3M")
         msa = task_path(args.work_root, protein.msa_path)
-        raw = msa.read_bytes()
-        records = a3m_records(raw, protein.sequence)
-        if not 2 <= len(records) <= 1024:
-            raise ConfigurationError("Optimization requires 2 to 1024 aligned AF3 MSA rows")
-        provenance = task_path(args.work_root, msa.with_name("msa-provenance.json"))
-        metadata = json.loads(provenance.read_text(encoding="utf-8"))
-        if (metadata.get("msa_sha256") != hashlib.sha256(raw).hexdigest()
-                or metadata.get("input_depth") != len(records)
-                or metadata.get("sequence_sha256") != hashlib.sha256(protein.sequence.encode()).hexdigest()):
-            raise ConfigurationError("AF3 MSA differs from the verified example import")
+        task_path(args.work_root, msa.with_name("msa-provenance.json"))
+        validate_msa_input(msa, protein.sequence)
 
     import jax
     from molcraft.agent.argmax import create_agent

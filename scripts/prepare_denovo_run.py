@@ -6,7 +6,7 @@ from pathlib import Path
 import yaml
 
 
-def prepare_configs(gba, vdr, output, inventory_manifest=None, *, evidence_manifest=None):
+def prepare_configs(gba, vdr, output, inventory_manifest=None, *, evidence_manifest=None, vdr_msa=None):
     output = Path(output).resolve()
     output.mkdir(parents=True, exist_ok=True)
     paths = []
@@ -25,6 +25,14 @@ def prepare_configs(gba, vdr, output, inventory_manifest=None, *, evidence_manif
         data["objective"] = {"protocol": "dbmol-denovo-v1", "affinity_weight": 1.,
                              "contact_weight": 2.5, "confidence_weight": 2.5, "geometry_weight": 0.}
         data.setdefault("run", {}).update(gradient_mode="through_structure", sampling_steps=25, trunk_passes=1)
+        if name == "VDR" and vdr_msa:
+            from molcraft.io.examples import validate_msa_input
+            msa = Path(vdr_msa).resolve()
+            if len(data["proteins"]) != 1:
+                raise ValueError("VDR MSA override requires the established single-protein construct")
+            validate_msa_input(msa, data["proteins"][0]["sequence"])
+            data["proteins"][0]["msa_path"] = str(msa)
+            data["run"]["msa_mode"] = "provided"
         data["evaluation"] = {"candidate_budget": 8, "sampling_steps": 200, "trunk_passes": 4,
                               "require_affinity_nonworsening": False, "coverage_mode": "off", "min_coverage": .5}
         data["optimization"] = {"strategy": "denovo", "max_rounds": rounds, "min_rounds": rounds,
@@ -49,7 +57,8 @@ if __name__ == "__main__":
     parser.add_argument("--output", required=True)
     parser.add_argument("--evidence-manifest", help="Defaults to data/inventory/uspto_simpretro.sqlite.manifest.json")
     parser.add_argument("--inventory-manifest", help="Optional Enamine enhancement")
+    parser.add_argument("--vdr-msa", help="Verified latest VDR A3M; overrides old single-sequence input")
     args = parser.parse_args()
     for path in prepare_configs(args.gba_config, args.vdr_config, args.output, args.inventory_manifest,
-                                evidence_manifest=args.evidence_manifest):
+                                evidence_manifest=args.evidence_manifest, vdr_msa=args.vdr_msa):
         print(path)
