@@ -140,8 +140,9 @@ def load_config(path):
         optimization = OptimizationSpec(**data.get("optimization", {}))
         synthesis = SynthesisPolicy(**data.get("synthesis", {}))
         denovo_data = data.get("denovo", {}).copy()
-        if denovo_data.get("inventory_manifest"):
-            denovo_data["inventory_manifest"] = str(resolve(denovo_data["inventory_manifest"]))
+        for field in ("evidence_manifest", "inventory_manifest"):
+            if denovo_data.get(field):
+                denovo_data[field] = str(resolve(denovo_data[field]))
         denovo = DeNovoPolicy(**denovo_data)
         result = RunConfig(spec, objective, policy, evaluation=evaluation,
                            optimization=optimization, synthesis=synthesis, denovo=denovo, **run)

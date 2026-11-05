@@ -182,13 +182,13 @@ def prepare_jobs(root, manifest):
     for job in manifest["jobs"]:
         if job.get("existing"):
             if job.get("strategy") == "denovo":
-                from molcraft.chemistry.inventory import InventoryIndex
+                from molcraft.chemistry.inventory import EvidenceIndex
                 config = load_config(inside(root, job["config"]))
                 expected = 17 if job["case"] == "gba-2v3d" else 16
                 if (config.optimization.strategy != "denovo" or config.optimization.min_rounds != expected
                         or config.optimization.max_rounds != expected or config.evaluation.candidate_budget != 8):
                     raise ValueError("De novo queue requires GBA 17 / VDR 16 rounds and 8 candidate attempts")
-                index = InventoryIndex(config.denovo.inventory_manifest or "")
+                index = EvidenceIndex.from_policy(config.denovo)
                 index.close()
             continue
         config_path = inside(root, job["config"])

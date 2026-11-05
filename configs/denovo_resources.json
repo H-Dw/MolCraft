@@ -1,16 +1,18 @@
 {
-  "purpose": "acquisition_plan_not_a_ready_inventory_manifest",
+  "purpose": "resource_setup_plan_not_a_ready_evidence_manifest",
   "stock": {
     "provider": "Enamine",
+    "required": false,
     "release": "2026-10 US Stock",
     "catalogue_url": "https://enamine.net/building-blocks/building-blocks-catalog",
     "expected_raw_count": 292887,
     "download_requires_login": true,
-    "status": "awaiting_official_stock_file",
+    "status": "optional_enhancement_not_configured",
     "sha256": null,
     "original_syncraft_snapshot": false
   },
   "templates": {
+    "required": true,
     "repository": "https://github.com/catalystforyou/SimpRetro",
     "revision": "5abbdd12d23bec3b0c524a3f5e59d160beac00f3",
     "path": "SimpRetro_templates.json",
@@ -20,7 +22,8 @@
     "frequency_at_least_two_filter_reproduced": false,
     "orientation": "retrosynthetic_product_to_reactants"
   },
-  "runtime_manifest_expected": "data/inventory/enamine_us_202610.sqlite.manifest.json",
+  "runtime_manifest_expected": "data/inventory/uspto_simpretro.sqlite.manifest.json",
+  "optional_inventory_manifest": "data/inventory/enamine_us_202610.sqlite.manifest.json",
   "case_library_fallback": false,
   "route_validation": "not_performed"
 }

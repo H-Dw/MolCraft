@@ -39,8 +39,8 @@ def create_agent(strategy, *, synthesis_policy=None, denovo_policy=None):
         agent = DeNovoAgent(client, policy=denovo_policy)
         return agent, {"api_models_http": None, "model": client.model,
                        "agent_protocol": agent.policy.protocol,
-                       "inventory": agent.inventory.manifest,
-                       "synthesis_evidence": "inventory_and_template_support_not_route_validation"}
+                       "chemical_evidence": agent.evidence.resource_metadata(),
+                       "synthesis_evidence": "soft_product_pattern_reference_with_optional_stock_not_route_validation"}
     if not client.available():
         raise ProviderError("DeepSeek models endpoint did not list deepseek-flash")
     if strategy == "syncraft":

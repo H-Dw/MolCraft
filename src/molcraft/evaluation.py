@@ -18,7 +18,7 @@ EVALUATION_PROTOCOL = "candidate-failure-isolation-v1"
 
 def evaluation_protocol(config):
     if config.optimization.strategy == "denovo":
-        return EVALUATION_PROTOCOL + "+denovo-v1+" + config.objective.protocol
+        return EVALUATION_PROTOCOL + "+" + config.denovo.protocol + "+" + config.objective.protocol
     return EVALUATION_PROTOCOL + ("+coverage-v1" if config.evaluation.coverage_mode != "off" else "")
 
 

@@ -1,4 +1,4 @@
-"""Versioned, offline inventory evidence. No case-derived synthetic claims."""
+"""Versioned product-pattern evidence with optional real stock enrichment."""
 
 from collections import Counter
 import gzip
@@ -12,7 +12,8 @@ from rdkit.Chem import rdChemReactions
 
 from molcraft.errors import ConfigurationError
 
-INDEX_VERSION = "inventory-motifs-v1"
+INDEX_VERSION = "motif-evidence-v2"
+LEGACY_INDEX_VERSION = "inventory-motifs-v1"
 
 
 def file_hash(path):
@@ -116,31 +117,39 @@ def _stock_records(path):
 
 
 def build_index(stock, destination, *, release, source_url, templates=None,
-                template_source_url=None, expected_sha256=None, expected_raw_count=None):
+                template_source_url=None, expected_sha256=None, expected_raw_count=None,
+                expected_template_sha256=None):
     """Build an immutable SQLite artifact and a content-addressed manifest."""
-    stock, destination = Path(stock).resolve(), Path(destination).resolve()
+    stock = Path(stock).resolve() if stock is not None else None
+    destination = Path(destination).resolve()
     if not release or not source_url:
-        raise ConfigurationError("Inventory release and source URL are required")
-    digest = file_hash(stock)
+        raise ConfigurationError("Evidence release and source URL are required")
+    if stock is None and templates is None:
+        raise ConfigurationError("Supply reaction templates or a real stock file; never case-derived substitutes")
+    digest = file_hash(stock) if stock else None
     if expected_sha256 and digest != expected_sha256:
         raise ConfigurationError("Inventory SHA-256 does not match the supplied manifest")
+    template_digest = file_hash(templates) if templates else None
+    if expected_template_sha256 and template_digest != expected_template_sha256:
+        raise ConfigurationError("Template SHA-256 does not match the supplied manifest")
     if templates and not template_source_url:
         raise ConfigurationError("Template provenance URL is required")
     manifest_path = destination.with_suffix(destination.suffix + ".manifest.json")
     if destination.exists() or manifest_path.exists():
-        raise ConfigurationError("Inventory index is immutable; use a new output path")
+        raise ConfigurationError("Evidence index is immutable; use a new output path")
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_suffix(destination.suffix + ".building")
     if temporary.exists():
         raise ConfigurationError("An incomplete index already occupies the build path")
     counts = Counter(raw=0, valid=0, unique=0, invalid=0, duplicate=0,
                      raw_templates=0, templates=0, invalid_templates=0, small_templates=0, unique_templates=0)
-    manifest = {"protocol": INDEX_VERSION, "provider": "Enamine", "release": release,
+    manifest = {"protocol": INDEX_VERSION, "provider": "Enamine" if stock else "USPTO/SimpRetro", "release": release,
+                "resource_mode": "inventory_enhanced" if stock else "templates_only",
                 "rdkit_version": rdBase.rdkitVersion,
                 "source_url": source_url, "stock_sha256": digest,
                 "original_syncraft_snapshot": False,
                 "standardization": "RDKit sanitize; preserve charge, H and stereochemistry; remove atom maps; single component",
-                "evidence_levels": ["inventory_fragment", "reaction_template_support"],
+                "evidence_levels": [],
                 "route_validation": "not_performed", "template_frequency_filter": "not_verified"}
     db = sqlite3.connect(temporary)
     try:
@@ -163,7 +172,7 @@ def build_index(stock, destination, *, release, source_url, templates=None,
                            [(element, identifier) for element in set(elements)])
 
         with rdBase.BlockLogs():
-            for row, vendor_id, molecule in _stock_records(stock):
+            for row, vendor_id, molecule in (_stock_records(stock) if stock else ()):
                 counts["raw"] += 1
                 if molecule is None or len(Chem.GetMolFrags(molecule)) != 1 or any(a.GetNumRadicalElectrons() for a in molecule.GetAtoms()):
                     counts["invalid"] += 1
@@ -185,7 +194,7 @@ def build_index(stock, destination, *, release, source_url, templates=None,
                 if counts["raw"] % 1000 == 0:
                     db.commit()
             if templates:
-                manifest["templates"] = {"sha256": file_hash(templates), "source_url": template_source_url,
+                manifest["templates"] = {"sha256": template_digest, "source_url": template_source_url,
                                          "orientation": "retrosynthetic_product_to_reactants"}
                 data = json.loads(Path(templates).read_text(encoding="utf-8"))
                 if not isinstance(data, list) or not all(isinstance(x, str) for x in data):
@@ -197,6 +206,8 @@ def build_index(stock, destination, *, release, source_url, templates=None,
                         if rxn is None or rxn.GetNumReactantTemplates() != 1:
                             raise ValueError("unsupported product template")
                         query = rxn.GetReactantTemplate(0)
+                        if len(Chem.GetMolFrags(query)) != 1:
+                            raise ValueError("Product pattern must be a connected local structure")
                         if query.GetNumAtoms() < 2:
                             counts["small_templates"] += 1
                             continue
@@ -209,11 +220,15 @@ def build_index(stock, destination, *, release, source_url, templates=None,
                         counts["templates"] += 1
                     except (ValueError, RuntimeError):
                         counts["invalid_templates"] += 1
-        if not counts["unique"]:
+        if stock and not counts["unique"]:
             raise ConfigurationError("Inventory has no usable structures")
+        if stock is None and not counts["templates"]:
+            raise ConfigurationError("Templates have no usable connected product patterns")
         if expected_raw_count is not None and counts["raw"] != expected_raw_count:
             raise ConfigurationError(f"Stock has {counts['raw']} records, expected {expected_raw_count}")
         counts["unique_templates"] = db.execute("SELECT count(*) FROM motifs WHERE kind='reaction_template_support'").fetchone()[0]
+        manifest["evidence_levels"] = (["inventory_fragment"] if counts["unique"] else []) + (
+            ["reaction_template_support"] if counts["templates"] else [])
         manifest["counts"] = dict(counts)
         manifest["motifs"] = db.execute("SELECT count(*) FROM motifs").fetchone()[0]
         db.execute("INSERT INTO metadata VALUES ('manifest',?)", (json.dumps(manifest),))
@@ -230,37 +245,62 @@ def build_index(stock, destination, *, release, source_url, templates=None,
         raise
 
 
-class InventoryIndex:
-    def __init__(self, manifest_path):
+class EvidenceIndex:
+    def __init__(self, manifest_path, *, inventory_manifest=None):
+        self.enhancement = None
         path = Path(manifest_path).resolve()
         if not path.is_file():
-            raise ConfigurationError("Inventory database is not ready; supply its manifest (no case fallback)")
+            raise ConfigurationError("Chemical evidence index is not ready; supply a template manifest (Enamine is optional; no case fallback)")
         self.manifest = json.loads(path.read_text(encoding="utf-8"))
         m = self.manifest
-        if m.get("protocol") != INDEX_VERSION or m.get("provider") != "Enamine":
-            raise ConfigurationError("Unsupported inventory provenance")
+        if (m.get("protocol"), m.get("provider")) not in {
+            (INDEX_VERSION, "Enamine"), (INDEX_VERSION, "USPTO/SimpRetro"), (LEGACY_INDEX_VERSION, "Enamine")
+        }:
+            raise ConfigurationError("Unsupported chemical evidence provenance")
         db_path = (path.parent / m["index_path"]).resolve()
         if file_hash(db_path) != m["index_sha256"]:
-            raise ConfigurationError("Inventory artifact hash mismatch")
+            raise ConfigurationError("Evidence artifact hash mismatch")
         self.db = sqlite3.connect(db_path.as_uri() + "?mode=ro", uri=True)
         self.db.row_factory = sqlite3.Row
         embedded = json.loads(self.db.execute("SELECT value FROM metadata WHERE key='manifest'").fetchone()[0])
         if any(m.get(k) != v for k, v in embedded.items()):
             self.db.close()
-            raise ConfigurationError("Inventory manifest disagrees with embedded provenance")
+            raise ConfigurationError("Evidence manifest disagrees with embedded provenance")
+        if inventory_manifest:
+            try:
+                self.enhancement = InventoryIndex(inventory_manifest)
+            except Exception:
+                self.db.close()
+                raise
+
+    @classmethod
+    def from_policy(cls, policy):
+        # inventory_manifest alone remains an explicit legacy stock-index choice.
+        return cls(policy.evidence_manifest or policy.inventory_manifest or "",
+                   inventory_manifest=policy.inventory_manifest if policy.evidence_manifest else None)
+
+    def resource_metadata(self):
+        return {"primary": self.manifest,
+                "inventory_enhancement": self.enhancement.manifest if self.enhancement else None,
+                "stock_loaded": bool(self.manifest["counts"]["unique"] or self.enhancement)}
 
     def close(self):
+        if self.enhancement:
+            self.enhancement.close()
         self.db.close()
 
     @staticmethod
     def _card(row):
         if row is None:
-            raise ConfigurationError("Unknown inventory evidence ID")
+            raise ConfigurationError("Unknown chemical evidence ID")
         return {**dict(row), "core": json.loads(row["core"]), "elements": json.loads(row["elements"]),
                 "example": json.loads(row["example"]), "route_validated": False}
 
     def get(self, identifier):
-        return self._card(self.db.execute("SELECT * FROM motifs WHERE id=?", (identifier,)).fetchone())
+        row = self.db.execute("SELECT * FROM motifs WHERE id=?", (identifier,)).fetchone()
+        if row is None and self.enhancement:
+            return self.enhancement.get(identifier)
+        return self._card(row)
 
     def retrieve(self, graph, tables, *, limit=6, anchor=None):
         # Retrieval is a bounded heuristic, never a chemical validity test. Match
@@ -283,12 +323,17 @@ class InventoryIndex:
             # Element-indexed lookup prevents the commonest carbon-only fragments
             # from consuming the entire retrieval budget for a heteroatom direction.
             placeholders = ",".join("?" for _ in preferred)
-            rows = self.db.execute(
-                f"SELECT * FROM motifs WHERE atom_count<=? AND kind=? AND id IN "
-                f"(SELECT motif_id FROM motif_elements WHERE element IN ({placeholders})) "
-                "ORDER BY support_count DESC,id LIMIT 512", (len(graph.atom_ids), kind, *preferred))
+            rows = {}
+            indexes = [self] + ([self.enhancement] if self.enhancement and kind == "inventory_fragment" else [])
+            for index in indexes:
+                query = index.db.execute(
+                    f"SELECT * FROM motifs WHERE atom_count<=? AND kind=? AND id IN "
+                    f"(SELECT motif_id FROM motif_elements WHERE element IN ({placeholders})) "
+                    "ORDER BY support_count DESC,id LIMIT 512", (len(graph.atom_ids), kind, *preferred))
+                for row in query:
+                    rows.setdefault(row["id"], row)
             ranked = []
-            for row in rows:
+            for row in rows.values():
                 card = self._card(row)
                 if any(e not in moves.labels and e != "*" for e in card["elements"]):
                     continue
@@ -317,11 +362,14 @@ class InventoryIndex:
 
     def assess(self, source, product, operations, evidence_ids):
         mol = product.to_rdkit()
+        source_mol = source.to_rdkit()
         touched = {i for op in operations for i in op.atom_ids}
-        hits, covered = [], set()
+        hits, covered, template_supported = [], set(), False
         for identifier in sorted(set(evidence_ids)):
             card = self.get(identifier)
             query = Chem.MolFromSmarts(card["smarts"])
+            prior_matches = {tuple(source_mol.GetAtomWithIdx(i).GetAtomMapNum() for i in match)
+                             for match in source_mol.GetSubstructMatches(query, useChirality=True)}
             for match in mol.GetSubstructMatches(query, useChirality=True):
                 core = {mol.GetAtomWithIdx(match[j]).GetAtomMapNum() for j in card["core"]}
                 if not core & touched:
@@ -329,10 +377,44 @@ class InventoryIndex:
                 # Templates are connection evidence, not verified complete stock motifs.
                 if card["kind"] == "inventory_fragment":
                     covered |= core
+                mapped_match = tuple(mol.GetAtomWithIdx(i).GetAtomMapNum() for i in match)
+                supports_bundle = (card["kind"] == "reaction_template_support"
+                                   and mapped_match not in prior_matches
+                                   and touched <= core
+                                   and _template_covers_operations(query, mapped_match, operations))
+                template_supported |= supports_bundle
                 hits.append({"evidence_id": identifier, "evidence_type": card["kind"],
                              "atom_ids": sorted(core), "source": card["example"],
+                             "supports_complete_update": supports_bundle if card["kind"] == "reaction_template_support" else touched <= core,
                              "route_validated": False})
         return {"catalog_preferred": bool(touched) and touched <= covered,
+                "template_preferred": bool(touched) and template_supported,
                 "matches": hits, "route_validation": "not_performed"}
 
 
+def _template_covers_operations(query, mapped_match, operations):
+    """A permissive/wildcard match cannot justify a specific chemical update."""
+    position = {identifier: i for i, identifier in enumerate(mapped_match)}
+    for op in operations:
+        if op.kind == "bond":
+            bond = query.GetBondBetweenAtoms(*(position[i] for i in op.atom_ids))
+            if bond is None or str(bond.GetBondType()) != op.value:
+                return False
+        else:
+            atom = query.GetAtomWithIdx(position[op.atom_ids[0]])
+            if op.kind == "atom" and atom.GetSymbol() != op.value:
+                return False
+            if op.kind == "charge" and ("AtomFormalCharge" not in atom.DescribeQuery()
+                                         or atom.GetFormalCharge() != op.value):
+                return False
+    return True
+
+
+class InventoryIndex(EvidenceIndex):
+    """Compatibility entry point for explicitly requested real Enamine stock."""
+
+    def __init__(self, manifest_path):
+        super().__init__(manifest_path)
+        if self.manifest.get("provider") != "Enamine":
+            self.close()
+            raise ConfigurationError("Inventory enhancement must come from real Enamine stock")

@@ -12,10 +12,10 @@ import time
 from molcraft.errors import MolCraftError
 
 
-def _inventory_preflight(config):
+def _evidence_preflight(config):
     if config.optimization.strategy == "denovo":
-        from molcraft.chemistry.inventory import InventoryIndex
-        index = InventoryIndex(config.denovo.inventory_manifest or "")
+        from molcraft.chemistry.inventory import EvidenceIndex
+        index = EvidenceIndex.from_policy(config.denovo)
         index.close()
 
 
@@ -73,7 +73,7 @@ def _propose(args):
     from molcraft.io.serialization import save_json, save_packet
 
     config = load_config(args.config)
-    _inventory_preflight(config)
+    _evidence_preflight(config)
     with prepare_complex(config.complex) as prepared, ExitStack() as stack:
         backend = Boltz2Backend.from_paths(config.complex.model_paths,
                                            config.sampling_steps, config.trunk_passes)
@@ -118,7 +118,7 @@ def _evaluate(args):
     from molcraft.io.serialization import load_packet, save_json
 
     config = load_config(args.config)
-    _inventory_preflight(config)
+    _evidence_preflight(config)
     packet = load_packet(args.packet)
     with prepare_complex(config.complex) as prepared:
         backend = Boltz2Backend.from_paths(config.complex.model_paths,
@@ -142,7 +142,7 @@ def _evaluate_set(args):
     from molcraft.io.serialization import load_packet, save_json
 
     config = load_config(args.config)
-    _inventory_preflight(config)
+    _evidence_preflight(config)
     packet = load_packet(args.packet)
     with prepare_complex(config.complex) as prepared, ExitStack() as stack:
         kwargs = {}
@@ -188,7 +188,7 @@ def _prepare_example(args):
 
     result = prepare_example(args.case, args.output, args.model_dir, msa_source=args.msa,
                              work_root=args.work_root, msa_mode=args.msa_mode, strategy=args.strategy,
-                             inventory_manifest=args.inventory_manifest)
+                             inventory_manifest=args.inventory_manifest, evidence_manifest=args.evidence_manifest)
     print(json.dumps(result, indent=2))
 
 
@@ -212,7 +212,7 @@ def _optimize(args):
         os.environ[name] = str(cache)
     os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
     config = load_config(task_path(args.work_root, args.config))
-    _inventory_preflight(config)
+    _evidence_preflight(config)
     config = replace(config, complex=replace(config.complex, cache_dir=temp))
     for protein in config.complex.proteins:
         if config.msa_mode == "single_sequence":
@@ -277,6 +277,21 @@ def _check_inventory(args):
     index.close()
 
 
+def _build_template_index(args):
+    from molcraft.chemistry.inventory import build_index
+    result = build_index(None, args.output, release=args.release, source_url=args.source_url,
+                         templates=args.templates, template_source_url=args.source_url,
+                         expected_template_sha256=args.expected_sha256)
+    print(json.dumps(result, indent=2))
+
+
+def _check_evidence(args):
+    from molcraft.chemistry.inventory import EvidenceIndex
+    index = EvidenceIndex(args.manifest, inventory_manifest=args.inventory_manifest)
+    print(json.dumps(index.resource_metadata(), indent=2))
+    index.close()
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="molcraft")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -305,7 +320,8 @@ def main(argv=None):
     example.add_argument("--msa")
     example.add_argument("--msa-mode", choices=("provided", "single_sequence"), default="provided")
     example.add_argument("--strategy", choices=("syncraft", "optagent", "argmax", "denovo"), default="syncraft")
-    example.add_argument("--inventory-manifest", help="Real stock index manifest for denovo")
+    example.add_argument("--evidence-manifest", help="Product-pattern index manifest for denovo")
+    example.add_argument("--inventory-manifest", help="Optional real Enamine stock enhancement")
     example.add_argument("--output", required=True)
     example.add_argument("--model-dir", required=True)
     example.add_argument("--work-root", default=".")
@@ -330,6 +346,17 @@ def main(argv=None):
     check = commands.add_parser("check-inventory", help="Verify inventory provenance and content hashes")
     check.add_argument("--manifest", required=True)
     check.set_defaults(func=_check_inventory)
+    templates = commands.add_parser("build-template-index", help="Index USPTO/SimpRetro product patterns; no stock required")
+    templates.add_argument("--templates", required=True)
+    templates.add_argument("--output", required=True)
+    templates.add_argument("--release", required=True)
+    templates.add_argument("--source-url", required=True)
+    templates.add_argument("--expected-sha256")
+    templates.set_defaults(func=_build_template_index)
+    evidence = commands.add_parser("check-evidence", help="Verify product-pattern evidence and optional Enamine enhancement")
+    evidence.add_argument("--manifest", required=True)
+    evidence.add_argument("--inventory-manifest")
+    evidence.set_defaults(func=_check_evidence)
     args = parser.parse_args(argv)
     try:
         args.func(args)

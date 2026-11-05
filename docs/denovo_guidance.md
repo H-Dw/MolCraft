@@ -3,6 +3,8 @@
 本策略对应 2026-11-05 批准的修订计划。显式设置 `optimization.strategy: denovo`；
 原 `syncraft`、`optagent`、`argmax` 及旧配置继续保留。新策略是固定重原子数的
 分子图设计，不要求早期碳链已经具有药效团，不把目录命中或 SA 阈值当作拒绝条件。
+根据后续修订，`denovo-motif-v2` 默认使用 USPTO/SimpRetro 产品模板作为软性参考，
+Enamine 库存改为可选增强。没有库存不再阻止运行。
 
 ## 科学目标与来源
 
@@ -44,23 +46,52 @@ ProteoCraft 的 0.25 是归一化梯度混合系数，均不搬入本项目的 g
 
 ## 真实数据库依赖
 
-[SynCraft 论文 §2.1](https://arxiv.org/html/2512.20333v1#S2.SS1) 的合成评估是
-SimpRetro＋USPTO 模板＋Enamine 终止库存。eMolecules 约 2300 万条商业分子用于
-构造 synthesis-cliff 案例，不作为本版运行时基团库存。公开
+[SynCraft 论文 §2.1](https://arxiv.org/html/2512.20333v1#S2.SS1) 使用
+SimpRetro＋USPTO 模板＋Enamine 终止库存进行数据标注和合成评估。原生在线推理
+从预先构建的参考示例检索，不直接查询 Enamine。库存通过离线标签影响参考数据，
+不是在线推理必需依赖。eMolecules 约 2300 万条商业分子用于构造 synthesis-cliff 案例，
+不作为本版运行时基团库存。公开
 [SynCraft skill pipeline](https://github.com/catalystforyou/SynCraft-Core/blob/557703e110b26a354afed2955ded5217837f6692/skill/syncraft/pipeline.py)
 不等同于运行完整逆合成搜索。
 
-获取清单是 [`configs/denovo_resources.json`](../configs/denovo_resources.json)。它不是
-可运行索引，也不包含虚构的库存 SHA-256。Enamine 官方 2026-10 US Stock 计划条数
-292,887；下载需登录，当前仍是正式运行前依赖。不能用案例产物或 SimpRetro 示例的
-`emolecules.txt` 替代。SynCraft 原实验精确库存快照未公开，本接入只声明同类真实库存。
+资源清单是 [`configs/denovo_resources.json`](../configs/denovo_resources.json)。它不是
+可运行索引，也不包含虚构的库存 SHA-256。新默认只需要真实的 USPTO/SimpRetro 模板。
+如额外使用 Enamine，可获取官方 2026-10 US Stock，计划条数 292,887，下载需登录。
+SynCraft 原实验精确库存快照未公开，本地库存增强只声明同类真实库存。
+模板、库存均不能以案例产物或 SimpRetro 示例的 `emolecules.txt` 冒充。
 
 公开模板已固定为 SimpRetro `5abbdd12d23bec3b0c524a3f5e59d160beac00f3`，51,720 个字符串，
 SHA-256 `f3a0546b1cd50c463a1df2b665ffe8d14e021f5babfc13c749601f469518a00f`。
 没有频次元数据，不能声称复现论文的“至少出现两次”筛选。模板按逆合成方向读取，
 左侧为产品；匹配只提供产品模式/连接依据，不证明反应物在库或完整路线存在。
 
-获得官方文件后，在独立位置保存原件、下载日期及供应商版本，构建不可覆写索引：
+先构建并校验默认模板索引，无需下载 Enamine：
+
+```bash
+molcraft build-template-index \
+  --templates data/inventory/sources/SimpRetro_templates.json \
+  --output data/inventory/uspto_simpretro.sqlite \
+  --release 'SimpRetro USPTO 5abbdd12d23bec3b0c524a3f5e59d160beac00f3' \
+  --source-url https://github.com/catalystforyou/SimpRetro/blob/5abbdd12d23bec3b0c524a3f5e59d160beac00f3/SimpRetro_templates.json \
+  --expected-sha256 f3a0546b1cd50c463a1df2b665ffe8d14e021f5babfc13c749601f469518a00f
+molcraft check-evidence --manifest data/inventory/uspto_simpretro.sqlite.manifest.json
+```
+
+默认配置为：
+
+```yaml
+denovo:
+  protocol: denovo-motif-v2
+  evidence_manifest: /workspace/MolCraft/data/inventory/uspto_simpretro.sqlite.manifest.json
+  inventory_manifest: null
+```
+
+模板索引不需要占位库存：`provider=USPTO/SimpRetro`、`resource_mode=templates_only`、
+库存条数为 0、`stock_sha256=null`，并明确记录没有进行路线验证。过小（少于两个原子）
+或不连通的产品模式有跳过计数，模板去重条数另存，不把原始 51,720 条等同于唯一基团数。
+
+可选的 Enamine 增强：获得官方文件后，在独立位置保存原件、下载日期及供应商版本，
+构建不可覆写索引：
 
 ```bash
 molcraft build-inventory \
@@ -73,6 +104,11 @@ molcraft build-inventory \
   --template-source-url https://github.com/catalystforyou/SimpRetro/blob/5abbdd12d23bec3b0c524a3f5e59d160beac00f3/SimpRetro_templates.json
 molcraft check-inventory --manifest data/inventory/enamine_us_202610.sqlite.manifest.json
 ```
+
+随后将 `denovo.inventory_manifest` 指向该库存索引即可；`evidence_manifest` 继续指向
+模板索引。运行时合并两类证据并对证据 ID 去重。显式配置的库存路径损坏或校验失败会
+报告错误；未配置库存时完全不尝试读取 Enamine。旧配置仅含 `inventory_manifest` 的
+组合库存索引仍可显式加载，历史配置不会被自动改写。
 
 如果已有可信的下载校验值，同时提供 `--expected-sha256`。若官网版本或原始条数变化，
 先更新获取清单，不忽略不一致。支持 SDF、SDF.gz、SMI/SMILES；不接收案例 JSON。
@@ -87,9 +123,13 @@ RDKit 版本、原文件及索引 SHA-256。保留电荷、氢和立体化学，
 512 条相关记录、返回少量卡片；这是有界近似检索，未命中不等于数据库不存在该基团。
 
 三种证据分别命名：`inventory_fragment`、`reaction_template_support`、完整路线验证。
-本版最后一项始终 `not_performed`。仅模板命中不获得“库存完整基团”的优先级。
-最终产物实际匹配库存核心，且所有编辑位置都被覆盖、高概率方向条件成立，才能获得
-目录优先；其他合法候选继续参与选择。目录缺失则明确报未就绪，绝不回退案例库。
+本版最后一项始终 `not_performed`。模板支持与库存支持分别记录，不能合并称为已验证可合成。
+新形成的产品模式必须在同一次匹配中覆盖全部操作：原子更新要有相应元素约束、电荷
+更新要有明确电荷约束、键更新要有相应键型约束，已在源图中存在的同位置模式不提升
+整个草案的优先级。通配符或编辑之外的局部匹配只作参考，不冒充完整更新的证据。
+符合高概率方向条件时，排序依次考虑完整库存局部结构、新形成的完整产品模式、其他
+合法更新；这只是软性优先级，没有命中仍可进入筛选。默认模板索引缺失才报告未就绪，
+不再强制要求库存，也不静默回退案例库。
 
 ## 每轮流程
 
@@ -106,8 +146,8 @@ RDKit 版本、原文件及索引 SHA-256。保留电荷、氢和立体化学，
 5. 目标是 16 个去重且原生准备成功的候选。LLM 不足时，最多尝试 64 个梯度排序的
    单项/双项补充。记录 `llm`、`program_fallback`、`carried_unmeasured` 来源。不能保证
    任意小分子都有 16 个合法未测候选；不足时如实输出 shortfall，不重复填满。
-6. 在高概率更新中先选有完整库存局部结构证据的候选，按编辑中心和基团证据类型分散，
-   再补其余合法候选。组内按联合梯度预测变化排序。没有 `0.25×ΔSA` 或 `0.85/0.15`。
+6. 在高概率更新中按上述库存／产品模式／其他合法更新的证据层次分散选择，
+   覆盖不同编辑中心和基团类型。组内按联合梯度预测变化排序。没有 `0.25×ΔSA` 或 `0.85/0.15`。
    SA 和 alerts 只输出诊断。选择顺序与梯度 softmax 概率分别保存，不再把名次概率叫方向概率。
 7. 最多八次候选 Boltz 复评；源分子另作同深度基线。同一随机量跟随稳定原子 ID 重映射。
    候选构象失败或非有限模型输出占用候选尝试预算并隔离；映射/配置损坏仍报告错误。
@@ -118,6 +158,8 @@ RDKit 版本、原文件及索引 SHA-256。保留电荷、氢和立体化学，
 `draft_feedback.json/.md` 每批更新，`draft_history.json/.md` 每轮追加指标。
 已生成但未复评的草案只在同一源图和协议下接续；已复评候选不会再进入后续轮次预算。
 重启恢复按源图、权重、数据库内容、代码、依赖版本及随机量校验。
+运行元数据与缓存标识包含主证据索引和可选库存增强各自的来源及 SHA-256，添加或移除
+库存均会改变运行身份；模板模式的结果不会错误复用库存增强模式的历史评分。
 协议变化会拒绝旧缓存；新权重必须重新计算梯度和评分，不直接横比两配方的 loss。
 
 ## 正式 GBA/VDR 运行
@@ -128,14 +170,14 @@ RDKit 版本、原文件及索引 SHA-256。保留电荷、氢和立体化学，
 python scripts/prepare_denovo_run.py \
   --gba-config outputs/syncraft-v2-fixed-rounds-20261105/configs/GBA.yaml \
   --vdr-config outputs/syncraft-v2-fixed-rounds-20261105/configs/VDR.yaml \
-  --inventory-manifest data/inventory/enamine_us_202610.sqlite.manifest.json \
-  --output outputs/denovo-20261105/configs
+  --evidence-manifest data/inventory/uspto_simpretro.sqlite.manifest.json \
+  --output outputs/denovo-templates-20261105/configs
 ```
 
 生成配置固定 GBA 17 轮、VDR 16 轮，`min_rounds=max_rounds`，每轮最多 8 次复评。
-`prepare-example --strategy denovo --inventory-manifest ...` 也可以生成新输入，但配对比较时
-应优先复用旧输入。库存校验通过后使用既有 DCU 启动环境和顺序队列；两个新输出目录
-分别运行 GBA 然后 VDR。未取得库存时只准备配置，不启动正式轨迹。
+`prepare-example --strategy denovo --evidence-manifest ...` 也可以生成新输入，但配对比较时
+应优先复用旧输入。模板索引校验通过后即可使用既有 DCU 启动环境和顺序队列，分别
+运行 GBA 然后 VDR。Enamine 只在需要库存增强或另行开展逆合成/采购评估时配置。
 
 核查输出：亲和力、binder 概率、contact/confidence 原始项和加权贡献、各 confidence
 子指标、覆盖率、geometry_pocket/clash、数据库匹配、池缺口、API/程序贡献、每批 usage。

@@ -1,4 +1,4 @@
-"""LLM-composed de novo bundles with real inventory evidence and native readiness."""
+"""LLM-composed de novo bundles with product-pattern evidence and native readiness."""
 
 from collections import Counter, defaultdict
 from importlib.resources import files
@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
-from molcraft.chemistry.inventory import InventoryIndex, chemical_context
+from molcraft.chemistry.inventory import EvidenceIndex, chemical_context
 from molcraft.chemistry.edits import compatible
 from molcraft.chemistry.synthesis import resonance_equivalent, sa_score, alerts
 from molcraft.errors import ChemistryError, ConfigurationError
@@ -24,7 +24,8 @@ from .optagent import compile_draft
 class DeNovoAgent:
     def __init__(self, client, policy=None, inventory=None):
         self.policy = policy or DeNovoPolicy()
-        self.inventory = inventory or InventoryIndex(self.policy.inventory_manifest or "")
+        self.evidence = inventory if inventory is not None else EvidenceIndex.from_policy(self.policy)
+        self.inventory = self.evidence  # compatibility for callers of the first de novo version
         self.client = client
 
     def propose(self, graph, evidence, policy, *, samples, round_index, context_id,
@@ -79,11 +80,14 @@ class DeNovoAgent:
                 claimed = claimed if isinstance(claimed, list) else []
                 # Inspect retrieved evidence independently of the LLM's claims.
                 identifiers = [c["id"] for c in cards]
-                assessment = self.inventory.assess(graph, updated, ops, identifiers)
+                assessment = self.evidence.assess(graph, updated, ops, identifiers)
                 assessment["unsupported_citations"] = [str(i) for i in claimed if i not in identifiers]
                 high = all((op.kind, op.atom_ids, op.value) in preferred_moves for op in ops)
                 assessment["high_probability_bundle"] = high
                 assessment["catalog_preferred"] &= high
+                assessment["template_preferred"] &= high
+                assessment["preference"] = ("inventory_fragment" if assessment["catalog_preferred"]
+                    else "reaction_product_pattern" if assessment["template_preferred"] else "gradient_only")
                 counts["native_attempts"] += 1
                 prepare_candidate(updated)
                 counts["native_ready"] += 1
@@ -104,7 +108,7 @@ class DeNovoAgent:
                 break
             if record.get("source_fingerprint") != graph.fingerprint or record.get("outcome") not in {"pending", "not_rescored"}:
                 continue
-            cards = self.inventory.retrieve(graph, tables, limit=self.policy.evidence_cards)
+            cards = self.evidence.retrieve(graph, tables, limit=self.policy.evidence_cards)
             consume({"operations": record["operations"], "rationale": "Carry forward an unmeasured draft."},
                     "carried_unmeasured", cards)
 
@@ -118,7 +122,7 @@ class DeNovoAgent:
             indices = {a.GetAtomMapNum(): a.GetIdx() for a in molecule.GetAtoms()}
             _, context_indices = chemical_context(molecule, {indices[anchor], *(indices[i] for i in expansion)})
             region = {molecule.GetAtomWithIdx(i).GetAtomMapNum() for i in context_indices}
-            cards = self.inventory.retrieve(graph, tables, limit=self.policy.evidence_cards, anchor=anchor)
+            cards = self.evidence.retrieve(graph, tables, limit=self.policy.evidence_cards, anchor=anchor)
             context = {"protocol": self.policy.protocol, "batch": batch + 1,
                        "requested_drafts": min(self.policy.batch_size, target - len(proposals)),
                        "mapped_smiles": graph.mapped_smiles, "anchor": anchor,
@@ -126,6 +130,7 @@ class DeNovoAgent:
                        "gradient_directions": top_half_directions(graph, tables, region),
                        "direction_semantics": "per-row top half, non-noop; joint-vocabulary probabilities, not success probabilities; omitted directions remain legal",
                        "evidence_cards": cards,
+                       "evidence_semantics": "reaction product patterns are soft references; stock fragments are optional enrichment; neither validates a route",
                        "draft_history": history_excerpt([*history, *feedback], graph.fingerprint, region),
                        "same_round_feedback": [{k: r[k] for k in ("operations", "outcome", "error") if k in r}
                                                for r in feedback[-self.policy.batch_size:]],
@@ -163,7 +168,7 @@ class DeNovoAgent:
 
         # A bounded fallback, not an unbounded search to manufacture a full pool.
         if len(proposals) < target:
-            cards = self.inventory.retrieve(graph, tables, limit=self.policy.evidence_cards)
+            cards = self.evidence.retrieve(graph, tables, limit=self.policy.evidence_cards)
             top = moves[:32]
             singles = [(op,) for op, _, _ in top]
             pairs = sorted([(a[0], b[0], a[1] + b[1]) for a, b in combinations(top, 2)
@@ -196,7 +201,7 @@ class DeNovoAgent:
                       "shortfall": max(0, target - len(ranked)), "selection_has_choice": len(ranked) > candidate_budget,
                       "stop_reason": "target_reached" if len(ranked) >= target else "bounded_resources_exhausted"},
              "funnel": dict(counts), "feedback": feedback,
-             "inventory": {k: self.inventory.manifest[k] for k in ("release", "stock_sha256", "index_sha256")}})
+             "chemical_evidence": self.evidence.resource_metadata()})
 
     @staticmethod
     def _save_feedback(directory, records, counts):
@@ -212,11 +217,11 @@ class DeNovoAgent:
     @staticmethod
     def _rank(proposals):
         ordered = []
-        for preferred in (True, False):
+        for preference in ("inventory_fragment", "reaction_product_pattern", "gradient_only"):
             groups = defaultdict(list)
             for item in proposals:
                 support = item[3]["database_support"]
-                if support["catalog_preferred"] != preferred:
+                if support["preference"] != preference:
                     continue
                 touched = sorted({i for op in item[0] for i in op.atom_ids})
                 motif = tuple(sorted(h["evidence_id"] for h in support["matches"]))

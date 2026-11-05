@@ -6,7 +6,7 @@ from pathlib import Path
 import yaml
 
 
-def prepare_configs(gba, vdr, output, inventory_manifest):
+def prepare_configs(gba, vdr, output, inventory_manifest=None, *, evidence_manifest=None):
     output = Path(output).resolve()
     output.mkdir(parents=True, exist_ok=True)
     paths = []
@@ -29,9 +29,13 @@ def prepare_configs(gba, vdr, output, inventory_manifest):
                               "require_affinity_nonworsening": False, "coverage_mode": "off", "min_coverage": .5}
         data["optimization"] = {"strategy": "denovo", "max_rounds": rounds, "min_rounds": rounds,
                                 "patience": 5, "drafts": 4}
-        data["denovo"] = {"protocol": "denovo-motif-v1", "inventory_manifest": str(Path(inventory_manifest).resolve()),
+        manifest = Path(evidence_manifest).resolve() if evidence_manifest else (
+            Path.cwd() / "data/inventory/uspto_simpretro.sqlite.manifest.json")
+        data["denovo"] = {"protocol": "denovo-motif-v2", "evidence_manifest": str(manifest),
                           "target_pool": 16, "batch_size": 4, "max_batches": 8,
                           "fallback_attempts": 64, "evidence_cards": 6, "gradient_diagnostics": False}
+        if inventory_manifest:
+            data["denovo"]["inventory_manifest"] = str(Path(inventory_manifest).resolve())
         with destination.open("x", encoding="utf-8") as handle:
             yaml.safe_dump(data, handle, sort_keys=False)
         paths.append(destination)
@@ -43,7 +47,9 @@ if __name__ == "__main__":
     parser.add_argument("--gba-config", required=True)
     parser.add_argument("--vdr-config", required=True)
     parser.add_argument("--output", required=True)
-    parser.add_argument("--inventory-manifest", required=True)
+    parser.add_argument("--evidence-manifest", help="Defaults to data/inventory/uspto_simpretro.sqlite.manifest.json")
+    parser.add_argument("--inventory-manifest", help="Optional Enamine enhancement")
     args = parser.parse_args()
-    for path in prepare_configs(args.gba_config, args.vdr_config, args.output, args.inventory_manifest):
+    for path in prepare_configs(args.gba_config, args.vdr_config, args.output, args.inventory_manifest,
+                                evidence_manifest=args.evidence_manifest):
         print(path)

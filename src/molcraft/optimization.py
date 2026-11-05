@@ -39,10 +39,10 @@ def _input_identity(config):
     if config.optimization.strategy == "denovo":
         from importlib.resources import files
         from importlib.metadata import version, PackageNotFoundError
-        from molcraft.chemistry.inventory import InventoryIndex
+        from molcraft.chemistry.inventory import EvidenceIndex
 
-        index = InventoryIndex(config.denovo.inventory_manifest or "")
-        inputs["inventory"] = index.manifest
+        index = EvidenceIndex.from_policy(config.denovo)
+        inputs["chemical_evidence"] = index.resource_metadata()
         index.close()
         for name in ("data/denovo_guidance.md", "agent/denovo.py", "agent/denovo_policy.py",
                      "agent/context.py", "agent/history.py", "agent/deepseek.py", "agent/optagent.py",

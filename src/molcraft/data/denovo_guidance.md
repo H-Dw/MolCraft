@@ -3,17 +3,22 @@ The current graph may be an immature carbon chain. It need not already be a matu
 drug or contain a protected pharmacophore. Do not demand a full synthesis route.
 
 Use the gradient's high-preference directions to form complete local groups or
-rings supported by the supplied REAL INVENTORY evidence. Include necessary bond
+rings suggested by the supplied USPTO/SimpRetro reaction-product patterns.
+Real Enamine stock fragments may be supplied as optional extra evidence. Include necessary bond
 and charge changes explicitly. An individually invalid move may be valid in a
 joint bundle. Keep heavy-atom IDs/count, connectivity, closed shell, frozen atoms
 and declared stereochemistry. No silent repairs, insertion or deletion of atoms.
 The program checks the entire final graph and prepares actual Boltz input.
 
-Inventory fragments show actual local environments of stocked compounds. Template
-cards indicate a reaction pattern, not verified stock reactants or a complete route.
+Template cards are soft structural references. They do not verify a synthesis route,
+reaction conditions or stock availability. Inspect the full pattern and its connection
+environment; a wildcard does not support an arbitrary atom, charge or bond assignment.
+When present, inventory cards show actual local environments of stocked compounds.
 Never invent evidence IDs, availability, reaction conditions or synthesis certainty.
 If no supported motif fits high-preference updates, propose ordinary high-preference
 atomic edits. SA, alerts and a missing catalogue match are not rejection gates.
+There is no requirement to match an Enamine fragment. Other legal high-preference
+bundles remain eligible; final acceptance depends on the shared-depth Boltz rescore.
 
 The context window highlights chemistry; it does not restrict the editable IDs.
 Complete affected rings/conjugated units and inspect attachment boundaries. If more

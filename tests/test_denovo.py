@@ -342,14 +342,21 @@ def test_dbmol_formula_gradient_sum_finite_difference_and_real_geometry_at_zero_
     np.testing.assert_allclose(total_grad, finite, rtol=1e-3, atol=1e-3)
 
 
-def test_two_round_resume_reuses_native_inputs_carries_pool_and_separately_archives_success(inventory, tmp_path, monkeypatch):
+@pytest.mark.parametrize("use_stock", [False, True])
+def test_two_round_resume_reuses_native_inputs_carries_pool_and_separately_archives_success(inventory, tmp_path, monkeypatch, use_stock):
     from molcraft.io.config import RunConfig, EvaluationSpec, OptimizationSpec
     from molcraft.optimization import optimize, _input_identity
     from molcraft.sampling.core import Noise
     from molcraft.types import ComplexSpec, ProteinSpec, ResidueRef, PreparedComplex
 
     spec = ComplexSpec((ProteinSpec("A", "ACD"),), "CCCCCC", (ResidueRef("A", 1),))
-    policy = DeNovoPolicy(inventory_manifest=str(tmp_path / "index.sqlite.manifest.json"))
+    if use_stock:
+        policy = DeNovoPolicy(inventory_manifest=str(tmp_path / "index.sqlite.manifest.json"))
+    else:
+        build_index(None, tmp_path / "template-only.sqlite", release="SYNTHETIC_TEST_ONLY",
+                    source_url="https://example.invalid", templates=tmp_path / "templates.json",
+                    template_source_url="https://example.invalid")
+        policy = DeNovoPolicy(evidence_manifest=str(tmp_path / "template-only.sqlite.manifest.json"))
     cfg = RunConfig(spec, ObjectiveSpec.denovo(), ProposalPolicy(), msa_mode="single_sequence", denovo=policy,
         evaluation=EvaluationSpec(candidate_budget=8),
         optimization=OptimizationSpec(max_rounds=2, min_rounds=2, patience=5, strategy="denovo"))
@@ -385,7 +392,7 @@ def test_two_round_resume_reuses_native_inputs_carries_pool_and_separately_archi
         return {"loss": 2., "metrics": {"affinity_loss": 1., "bcov": .9, "affinity_pred_value": -.2}}
 
     monkeypatch.setattr("molcraft.api.evaluate_candidate", rescore)
-    agent, backend, carried = DeNovoAgent(None, policy, inventory), Backend(), set()
+    agent, backend, carried = DeNovoAgent(None, policy, inventory if use_stock else None), Backend(), set()
     output = tmp_path / "run"
     args = dict(backend=backend, evaluation_backend=backend, prepare=prepare)
     first = optimize(cfg, agent, output, stop_after=1, **args)
@@ -403,3 +410,5 @@ def test_two_round_resume_reuses_native_inputs_carries_pool_and_separately_archi
     assert _input_identity(cfg)[0] != _input_identity(changed)[0]
     with pytest.raises(StaleProposalError):
         optimize(changed, agent, output, resume=True, **args)
+    if not use_stock:
+        agent.evidence.close()

@@ -5,11 +5,11 @@ Frozen Boltz-2 input gradients -> chemically constrained discrete ligand edits.
 MolCraft uses atom, undirected-bond and formal-charge derivatives to construct edit
 preferences. The current molecule remains discrete and valid. No DeFoG repair or
 continuous graph optimization is used. The independent `denovo` Agent composes
-high-gradient-preference atom updates with evidence from real building-block inventory
-and reaction templates. It uses bounded candidate pools, shared draft feedback and
+high-gradient-preference atom updates with soft structural references from USPTO/SimpRetro
+reaction-product patterns. Real Enamine stock is optional enrichment. It uses bounded candidate pools, shared draft feedback and
 native Boltz input preparation. Its DBMol objective uses weights 1/2.5/2.5/0;
-inventory matches give preference without excluding other legal edits. A verified
-inventory is required before running it. SynCraft, OptAgent and no-LLM argmax remain
+pattern and optional inventory matches give preference without excluding other legal edits. A verified
+template evidence index is sufficient to run it. SynCraft, OptAgent and no-LLM argmax remain
 available for reproducing earlier trajectories.
 
 ## Design and algorithms
@@ -94,7 +94,7 @@ optional affinity-proxy nonworsening gate. The source baseline is recomputed at
 the same depth as candidates. `next_graph.json` contains the recommended graph,
 including its hydrogen editing policy; the input is not mutated. This is one
 round. Use `molcraft optimize` for a restartable multi-round Agent trajectory.
-`prepare-example --strategy denovo --inventory-manifest ...` enables the new de novo
+`prepare-example --strategy denovo --evidence-manifest ...` enables the new de novo
 protocol. The example generator retains `syncraft` as its compatibility default;
 select `denovo` explicitly. `--strategy optagent` and `--strategy argmax` reproduce
 the earlier paths. Optimization performance must be measured in fresh trajectories
